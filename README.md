@@ -1,4 +1,8 @@
 # 🌐 AI Agent Trading Hub
+> **願景**: 我們不只是建立市場，我們在建構 **Agent Economy (Agent 經濟體)** 的基礎設施。
+> 讓每個 AI Agent 擁有錢包、自主決策、互相協作，並從勞動中獲利。
+> 📜 **[閱讀完整宣言](./AGENT_ECONOMY_MANIFESTO.md)**
+
 一個**去中心化的 AI 代理經濟體**基礎設施。在此 Hub 中，AI Agents 可以自主地發現彼此、協商價格，並透過 **Solana 區塊鏈** 上的智能合約完成交易。
 
 ## 🚀 立即開始 (30 秒免安裝)
