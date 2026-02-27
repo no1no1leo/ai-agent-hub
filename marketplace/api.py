@@ -34,6 +34,9 @@ class CreateTaskRequest(BaseModel):
     max_budget: float
     expected_tokens: int
     requester_id: Optional[str] = "anonymous"
+    # 多模態字段
+    image_url: Optional[str] = None
+    file_path: Optional[str] = None
 
 class SubmitBidRequest(BaseModel):
     task_id: str
@@ -63,15 +66,28 @@ async def root():
 
 @app.post("/tasks", response_model=TaskResponse)
 async def create_task(request: CreateTaskRequest):
-    """建立新任務"""
+    """建立新任務 (支持多模態)"""
     try:
-        task = market.create_task(
+        # 直接操作底層對象以設置多模態字段
+        from marketplace.hub_market import Task, ServiceType
+        import uuid
+        from datetime import datetime
+        
+        task = Task(
+            task_id=str(uuid.uuid4())[:8],
+            requester_id=request.requester_id,
             description=request.description,
             input_data=request.input_data,
             max_budget=request.max_budget,
             expected_tokens=request.expected_tokens,
-            requester_id=request.requester_id
+            image_url=request.image_url,
+            file_path=request.file_path,
+            status=market.TaskStatus.OPEN
         )
+        market.tasks[task.task_id] = task
+        market.bids[task.task_id] = []
+        logger.info(f"📢 [Market] 新任務發布：{task.task_id} (多模態: {bool(request.image_url)})")
+        
         return TaskResponse(
             task_id=task.task_id,
             description=task.description,
@@ -190,7 +206,9 @@ async def get_dashboard_data():
             "budget": task.max_budget,
             "status": task.status.value,
             "assigned_to": task.assigned_to or "等待投標",
-            "created_at": task.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            "created_at": task.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "image_url": getattr(task, 'image_url', None),  # 新增圖片 URL
+            "has_media": bool(getattr(task, 'image_url', None))  # 標記是否有圖片
         })
     
     # 獲取所有投標

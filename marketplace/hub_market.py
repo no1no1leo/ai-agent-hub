@@ -18,13 +18,17 @@ class TaskStatus(Enum):
 
 @dataclass
 class Task:
-    """任務定義"""
+    """任務定義 (支持多模態)"""
     task_id: str
     requester_id: str
     description: str
     input_data: str
     max_budget: float  # 買方願意支付的最高金額 (SOL)
     expected_tokens: int  # 預估 Token 消耗量
+    # 多模態字段
+    image_url: Optional[str] = None  # 可選的圖片 URL
+    file_path: Optional[str] = None  # 可選的文件路徑
+    
     status: TaskStatus = TaskStatus.OPEN
     assigned_to: Optional[str] = None
     result: Optional[str] = None
