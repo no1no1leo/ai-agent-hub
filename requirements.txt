@@ -1,0 +1,17 @@
+# Web Framework
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+pydantic>=2.0.0
+
+# Solana SDK (for interacting with chain later)
+solana>=0.30.0
+anchorpy>=0.18.0
+
+# AI & Tools
+openai>=1.0.0  # 用於模擬 LLM 議價
+python-dotenv>=1.0.0
+loguru>=0.6.0
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
