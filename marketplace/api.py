@@ -51,6 +51,9 @@ async def root():
     return {
         "message": "Welcome to AI Agent Marketplace",
         "docs": "/docs",
+        "community": {
+            "threads": "https://www.threads.com/@engineer.rp/post/DVPtjD4EiY6?xmt=AQF0z8TF9-bg2tRhNIXogI6SPFsW4ut59uuG1HD_jdkW6XbpeZNL5WThwqCWMG0IWHBOPtu4&slof=1"
+        },
         "stats": market.get_market_stats()
     }
 
