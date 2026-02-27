@@ -1,6 +1,7 @@
 """
 AI Agent 任務競標市場 (Hub Market)
 核心邏輯：讓 Agent 互相競爭，找出完成任務的最低成本方案
+純文字/通用描述版本，不依賴特定多模態引擎
 """
 import uuid
 import time
@@ -18,17 +19,13 @@ class TaskStatus(Enum):
 
 @dataclass
 class Task:
-    """任務定義 (支持多模態)"""
+    """任務定義 (純文字/通用描述)"""
     task_id: str
     requester_id: str
-    description: str
-    input_data: str
+    description: str  # 任務描述 (可包含圖片連結或詳細說明)
+    input_data: str  # 輸入數據 (可以是 URL, 文件路徑或純文字)
     max_budget: float  # 買方願意支付的最高金額 (SOL)
-    expected_tokens: int  # 預估 Token 消耗量
-    # 多模態字段
-    image_url: Optional[str] = None  # 可選的圖片 URL
-    file_path: Optional[str] = None  # 可選的文件路徑
-    
+    expected_tokens: int  # 預估代價 (通用單位)
     status: TaskStatus = TaskStatus.OPEN
     assigned_to: Optional[str] = None
     result: Optional[str] = None
@@ -41,8 +38,8 @@ class Bid:
     task_id: str
     bidder_id: str
     bid_price: float  # 投標價格
-    estimated_tokens: int  # 預估使用 Token 數
-    model_name: str  # 使用的模型 (例如：Qwen-32B, Llama-3-70B)
+    estimated_tokens: int  # 預估使用量
+    model_name: str  # 使用的模型/策略名稱
     message: str = ""
 
 class HubMarket:
@@ -54,7 +51,7 @@ class HubMarket:
         self.tasks: Dict[str, Task] = {}
         self.bids: Dict[str, List[Bid]] = {}  # task_id -> bids
         self.task_results: Dict[str, str] = {}
-        logger.info("🏪 Hub Market 初始化完成")
+        logger.info("🏪 Hub Market 初始化完成 (純文字/通用版)")
 
     def create_task(self, description: str, input_data: str, max_budget: float, 
                     expected_tokens: int, requester_id: str = "buyer_001") -> Task:
