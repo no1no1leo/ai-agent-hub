@@ -1,6 +1,7 @@
 """
 AI Agent Marketplace Web API
 風格化首頁：參考 RentAHuman.ai 的極簡與衝擊力
+支援多穩定幣 (USDC) 計價
 """
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -14,38 +15,56 @@ from .hub_market import HubMarket, TaskStatus, market
 from .reputation import reputation_system
 from .solana_escrow import solana_escrow
 
-app = FastAPI(title="AI Agent Marketplace", version="2.0.0")
+app = FastAPI(title="AI Agent Marketplace", version="2.1.0")
 
-# === 數據模型 (簡化) ===
+# === 數據模型 ===
 class CreateTaskRequest(BaseModel):
     description: str
     input_data: str
     max_budget: float
     expected_tokens: int
     requester_id: Optional[str] = "anonymous"
-    currency: Optional[str] = "SOL"  # 新增：指定支付幣種 (SOL, USDC, USDT)
+    currency: Optional[str] = "USDC"  # 預設 USDC
 
 # === API 端點 (JSON) ===
 @app.get("/api/stats")
 async def get_stats_json():
+    """獲取市場統計 - 預設以 USDC 計價"""
+    base_stats = market.get_market_stats()
+    sol_price_usdc = 100.0  # 模擬匯率: 1 SOL = 100 USDC
+    avg_sol = base_stats.get("avg_winning_bid", 0)
+    
     return {
-        "market": market.get_market_stats(),
-        "solana": solana_escrow.get_market_stats() if solana_escrow else {}
+        "market": {
+            **base_stats,
+            "avg_winning_bid_usdc": avg_sol * sol_price_usdc,
+            "currency": "USDC"
+        },
+        "solana": solana_escrow.get_market_stats() if solana_escrow else {},
+        "exchange_rate": {"SOL_USDC": sol_price_usdc}
     }
 
 @app.get("/api/dashboard-data")
 async def get_dashboard_data_json():
-    # 簡化數據結構以適應前端
-    tasks = [{"id": t.task_id, "desc": t.description, "budget": t.max_budget, "status": t.status.value} for t in market.tasks.values()]
+    """專為前端儀表板設計的數據接口"""
+    tasks = [{"id": t.task_id, "desc": t.description, "budget": t.max_budget, "status": t.status.value, "currency": getattr(t, 'currency', 'USDC')} for t in market.tasks.values()]
     bids = []
     for tid, blist in market.bids.items():
         for b in blist:
-            bids.append({"task": tid, "bidder": b.bidder_id, "price": b.bid_price})
+            bids.append({"task": tid, "bidder": b.bidder_id, "price": b.bid_price, "currency": getattr(b, 'currency', 'USDC')})
+    
+    base_stats = market.get_market_stats()
+    sol_price_usdc = 100.0
     
     return {
-        "tasks": tasks[-5:], # 只要最近 5 個
+        "tasks": tasks[-5:],
         "bids": bids[-5:],
-        "stats": market.get_market_stats()
+        "stats": {
+            "total_tasks": base_stats.get("total_tasks", 0),
+            "total_bids": base_stats.get("total_bids", 0),
+            "avg_winning_bid_usdc": base_stats.get("avg_winning_bid", 0) * sol_price_usdc,
+            "currency": "USDC"
+        }
     }
 
 @app.post("/tasks", response_model=None)
@@ -56,7 +75,10 @@ async def create_task(request: CreateTaskRequest):
             max_budget=request.max_budget, expected_tokens=request.expected_tokens,
             requester_id=request.requester_id
         )
-        return {"task_id": task.task_id, "status": "created"}
+        # 記錄幣別 (模擬)
+        if hasattr(task, 'currency'):
+            task.currency = request.currency
+        return {"task_id": task.task_id, "status": "created", "currency": request.currency}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -113,10 +135,9 @@ async def landing_page(request: Request):
                     <div class="text-gray-400">已完成投標</div>
                 </div>
                 <div class="card p-6 rounded-2xl text-center">
-                    <div class="text-4xl font-bold text-pink-400 mb-2">{{ stats.avg_winning_bid.toFixed(4) }}</div>
-                    <div class="text-gray-400">平均成交價 (SOL)</div>
+                    <div class="text-4xl font-bold text-pink-400 mb-2">${{ stats.avg_winning_bid_usdc ? stats.avg_winning_bid_usdc.toFixed(2) : '0.00' }}</div>
+                    <div class="text-gray-400">平均成交價 (USDC)</div>
                 </div>
-                <!-- 可在此擴充顯示 USDC 統計 -->
             </div>
         </section>
 
@@ -137,7 +158,7 @@ async def landing_page(request: Request):
                             <div class="text-xs text-gray-500">ID: {{ task.id }}</div>
                         </div>
                         <div class="text-right">
-                            <div class="font-bold text-green-400">{{ task.budget }} SOL</div>
+                            <div class="font-bold text-green-400">{{ task.budget }} {{ task.currency || 'USDC' }}</div>
                             <div class="text-xs text-gray-500 capitalize">{{ task.status }}</div>
                         </div>
                     </div>
@@ -153,14 +174,14 @@ async def landing_page(request: Request):
                         <thead class="text-gray-400 border-b border-gray-700">
                             <tr>
                                 <th class="text-left py-2">投標者</th>
-                                <th class="text-left py-2">價格 (SOL)</th>
+                                <th class="text-left py-2">價格</th>
                                 <th class="text-right py-2">任務</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr v-for="bid in bids" :key="bid.bidder" class="border-b border-gray-800">
                                 <td class="py-3 font-medium text-white">{{ bid.bidder }}</td>
-                                <td class="py-3 text-green-400">{{ bid.price }}</td>
+                                <td class="py-3 text-green-400">{{ bid.price }} {{ bid.currency || 'USDC' }}</td>
                                 <td class="py-3 text-right text-gray-500 text-xs">{{ bid.task }}</td>
                             </tr>
                             <tr v-if="bids.length === 0"><td colspan="3" class="text-center text-gray-500 py-4">暫無投標</td></tr>
@@ -175,7 +196,7 @@ async def landing_page(request: Request):
         const { createApp } = Vue;
         createApp({
             data() {
-                return { tasks: [], bids: [], stats: { total_tasks: 0, total_bids: 0, avg_winning_bid: 0 } }
+                return { tasks: [], bids: [], stats: { total_tasks: 0, total_bids: 0, avg_winning_bid_usdc: 0 } }
             },
             mounted() { this.fetchData(); setInterval(this.fetchData, 3000); },
             methods: {
