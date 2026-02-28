@@ -23,6 +23,7 @@ class CreateTaskRequest(BaseModel):
     max_budget: float
     expected_tokens: int
     requester_id: Optional[str] = "anonymous"
+    currency: Optional[str] = "SOL"  # 新增：指定支付幣種 (SOL, USDC, USDT)
 
 # === API 端點 (JSON) ===
 @app.get("/api/stats")
@@ -115,6 +116,7 @@ async def landing_page(request: Request):
                     <div class="text-4xl font-bold text-pink-400 mb-2">{{ stats.avg_winning_bid.toFixed(4) }}</div>
                     <div class="text-gray-400">平均成交價 (SOL)</div>
                 </div>
+                <!-- 可在此擴充顯示 USDC 統計 -->
             </div>
         </section>
 

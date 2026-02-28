@@ -30,19 +30,20 @@ class SolanaEscrowService:
         self, 
         buyer_pubkey: Pubkey, 
         seller_pubkey: Pubkey, 
-        amount_lamports: int, 
-        task_id: str
+        amount: int, 
+        task_id: str,
+        token_mint: Optional[str] = None  # 新增：指定代幣 (None 代表 SOL)
     ) -> str:
         """
         建立託管賬戶 (模擬智能合約邏輯)
         在真實場景中，這會調用鏈上 Program ID 的指令
         此處演示如何構建並發送交易
         """
-        logger.info(f"📝 [Chain] 準備建立託管：買方={buyer_pubkey}, 賣方={seller_pubkey}, 金額={amount_lamports} Lamports")
+        currency_type = "SOL" if token_mint is None else token_mint
+        logger.info(f"📝 [Chain] 準備建立託管：買方={buyer_pubkey}, 賣方={seller_pubkey}, 金額={amount}, 幣別={currency_type}")
         
         # --- 模擬智能合約邏輯 ---
-        # 在真實世界中，這裡會構建一個 Instruction 調用 Escrow Program
-        # 例如：create_escrow(buyer, seller, amount, task_id)
+        # 在真實世界中，這裡會根據 token_mint 判斷是調用 System Program (SOL) 還是 Token Program (SPL)
         
         escrow_id = f"escrow_{task_id}_{buyer_pubkey}"
         
@@ -51,10 +52,11 @@ class SolanaEscrowService:
             "id": escrow_id,
             "buyer": str(buyer_pubkey),
             "seller": str(seller_pubkey),
-            "amount": amount_lamports,
+            "amount": amount,
+            "currency": currency_type, # 新增：記錄幣別
             "task_id": task_id,
             "status": "created",
-            "tx_hash": "simulated_tx_hash" # 模擬交易哈希
+            "tx_hash": "simulated_tx_hash"
         }
         
         logger.info(f"✅ [Chain] 託管賬戶已建立 (模擬): {escrow_id}")
