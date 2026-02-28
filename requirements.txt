@@ -4,6 +4,6 @@ pydantic>=2.0.0
 loguru>=0.6.0
 python-dotenv>=1.0.0
 
-# Solana Blockchain
+# Solana Blockchain (for wallet & escrow)
 solana>=0.32.0
 solders>=0.21.0
