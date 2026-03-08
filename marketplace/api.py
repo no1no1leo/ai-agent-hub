@@ -5,7 +5,7 @@ AI Agent Marketplace Web API
 """
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from loguru import logger
 import uvicorn
@@ -21,12 +21,30 @@ app = FastAPI(title="AI Agent Marketplace", version="2.1.0")
 class CreateTaskRequest(BaseModel):
     description: str
     input_data: str
-    max_budget: float
-    expected_tokens: int
+    max_budget: float = Field(gt=0, description="預算必須大於 0")
+    expected_tokens: int = Field(gt=0, description="預期 token 數必須大於 0")
     requester_id: Optional[str] = "anonymous"
     currency: Optional[str] = "USDC"  # 預設 USDC
+    
+    @field_validator('description')
+    @classmethod
+    def description_not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('任務描述不能為空')
+        return v.strip()
 
 # === API 端點 (JSON) ===
+from fastapi.middleware.cors import CORSMiddleware
+
+# 添加 CORS 支援
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.get("/api/stats")
 async def get_stats_json():
     """獲取市場統計 - 預設以 USDC 計價"""
@@ -218,6 +236,33 @@ async def landing_page(request: Request):
 </html>
     """
     return HTMLResponse(content=html_content)
+
+# === 健康檢查端點 ===
+@app.get("/health")
+async def health_check():
+    """系統健康檢查"""
+    return {
+        "status": "healthy",
+        "version": "2.1.0",
+        "timestamp": datetime.utcnow().isoformat(),
+        "market": {
+            "total_tasks": len(market.tasks),
+            "active_tasks": len([t for t in market.tasks.values() if t.status.value == "open"])
+        },
+        "solana": {
+            "total_escrows": len(solana_escrow.escrows) if solana_escrow else 0,
+            "tvl": solana_escrow.total_value_locked if solana_escrow else 0
+        }
+    }
+
+# === 全局異常處理 ===
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"全局異常: {exc}")
+    return HTMLResponse(
+        status_code=500,
+        content={"error": "內部伺服器錯誤", "detail": str(exc)}
+    )
 
 def run_server(host: str = "0.0.0.0", port: int = 8000):
     uvicorn.run(app, host=host, port=port)

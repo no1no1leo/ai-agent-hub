@@ -29,12 +29,14 @@ def run_scale_simulation(num_tasks=100, num_agents=20):
     base_agents = create_diverse_solvers()
     
     # 擴展到指定數量
+    import copy
     all_agents = []
     for i in range(num_agents):
-        base_config = base_agents[i % len(base_agents)]
-        config = base_config.config
-        config.agent_id = f"algo_agent_{i:03d}"
-        all_agents.append(base_config)  # 此處簡化，實際應 deep copy
+        base_agent = base_agents[i % len(base_agents)]
+        # 深拷貝以避免共享配置
+        new_agent = copy.deepcopy(base_agent)
+        new_agent.config.agent_id = f"algo_agent_{i:03d}"
+        all_agents.append(new_agent)
     
     print(f"   ✅ 建立 {len(all_agents)} 個 Agent")
     
