@@ -165,6 +165,61 @@ async def landing_page(request: Request):
             </div>
         </section>
 
+        <!-- Create Task Form -->
+        <section class="max-w-4xl mx-auto px-4 mb-16">
+            <div class="card rounded-2xl p-6">
+                <h2 class="text-2xl font-bold mb-6 flex items-center gap-2">
+                    <span class="text-2xl">📝</span>
+                    發布新任務
+                </h2>
+                <form @submit.prevent="createTask" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">任務描述</label>
+                        <input v-model="newTask.description" type="text" placeholder="例如：翻譯一段文字" 
+                            class="w-full px-4 py-2 bg-white/5 border border-gray-700 rounded-lg focus:border-indigo-500 focus:outline-none text-white"
+                            required>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-400 mb-1">輸入數據</label>
+                            <input v-model="newTask.input_data" type="text" placeholder="例如：Hello world" 
+                                class="w-full px-4 py-2 bg-white/5 border border-gray-700 rounded-lg focus:border-indigo-500 focus:outline-none text-white">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-400 mb-1">預算 (USDC)</label>
+                            <input v-model.number="newTask.max_budget" type="number" step="0.1" min="0.1" 
+                                class="w-full px-4 py-2 bg-white/5 border border-gray-700 rounded-lg focus:border-indigo-500 focus:outline-none text-white"
+                                required>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-400 mb-1">預期 Token 數</label>
+                            <input v-model.number="newTask.expected_tokens" type="number" min="1" 
+                                class="w-full px-4 py-2 bg-white/5 border border-gray-700 rounded-lg focus:border-indigo-500 focus:outline-none text-white"
+                                required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-400 mb-1">請求者 ID</label>
+                            <input v-model="newTask.requester_id" type="text" placeholder="anonymous" 
+                                class="w-full px-4 py-2 bg-white/5 border border-gray-700 rounded-lg focus:border-indigo-500 focus:outline-none text-white">
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <button type="submit" :disabled="creating" 
+                            class="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600 rounded-lg font-bold transition flex items-center gap-2">
+                            <span v-if="creating" class="animate-spin">⏳</span>
+                            <span v-else>🚀</span>
+                            {{ creating ? '創建中...' : '發布任務' }}
+                        </button>
+                        <span v-if="createMessage" :class="createMessage.type === 'success' ? 'text-green-400' : 'text-red-400'" class="text-sm">
+                            {{ createMessage.text }}
+                        </span>
+                    </div>
+                </form>
+            </div>
+        </section>
+
         <!-- Live Market Feed -->
         <section id="market-section" class="max-w-4xl mx-auto px-4 pb-20">
             <h2 class="text-3xl font-bold mb-8 flex items-center gap-2">
@@ -186,7 +241,10 @@ async def landing_page(request: Request):
                             <div class="text-xs text-gray-500 capitalize">{{ task.status }}</div>
                         </div>
                     </div>
-                    <div v-if="tasks.length === 0" class="text-center text-gray-500 py-4">等待任務中...</div>
+                    <div v-if="tasks.length === 0" class="text-center text-gray-500 py-4">
+                        <div class="text-4xl mb-2">📭</div>
+                        <div>尚無任務，成為第一個發布者！</div>
+                    </div>
                 </div>
             </div>
 
@@ -224,7 +282,17 @@ async def landing_page(request: Request):
                     return { 
                         tasks: [], 
                         bids: [], 
-                        stats: { total_tasks: 0, total_bids: 0, avg_winning_bid_usdc: 0 } 
+                        stats: { total_tasks: 0, total_bids: 0, avg_winning_bid_usdc: 0 },
+                        newTask: {
+                            description: '',
+                            input_data: '',
+                            max_budget: 1.0,
+                            expected_tokens: 100,
+                            requester_id: 'web_user',
+                            currency: 'USDC'
+                        },
+                        creating: false,
+                        createMessage: null
                     }
                 },
                 mounted() { 
@@ -246,7 +314,30 @@ async def landing_page(request: Request):
                         }
                     },
                     scrollToMarket() {
-                        document.getElementById('market-section').scrollIntoView({ behavior: 'smooth' });
+                        const marketSection = document.getElementById('market-section');
+                        if (marketSection) {
+                            marketSection.scrollIntoView({ behavior: 'smooth' });
+                        }
+                    },
+                    async createTask() {
+                        this.creating = true;
+                        this.createMessage = null;
+                        try {
+                            const res = await axios.post('/tasks', this.newTask);
+                            console.log('Task created:', res.data);
+                            this.createMessage = { type: 'success', text: '✅ 任務創建成功！ID: ' + res.data.task_id };
+                            this.newTask.description = '';
+                            this.newTask.input_data = '';
+                            this.newTask.max_budget = 1.0;
+                            this.newTask.expected_tokens = 100;
+                            this.fetchData();
+                            setTimeout(() => this.createMessage = null, 3000);
+                        } catch (e) {
+                            console.error('Create task error:', e);
+                            this.createMessage = { type: 'error', text: '❌ 創建失敗：' + (e.response?.data?.detail || e.message) };
+                        } finally {
+                            this.creating = false;
+                        }
                     }
                 }
             }).mount('#app');
