@@ -4,7 +4,7 @@
 """
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from loguru import logger
 
 @dataclass
@@ -16,7 +16,7 @@ class AgentReputation:
     failed_tasks: int = 0
     avg_rating: float = 4.0  # 初始 4.0 分 (滿分 5 分)
     total_earnings: float = 0.0
-    join_date: datetime = field(default_factory=datetime.utcnow)
+    join_date: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     # 最近 10 次評價
     recent_ratings: List[float] = field(default_factory=lambda: [4.0] * 10)

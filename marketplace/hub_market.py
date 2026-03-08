@@ -6,7 +6,7 @@ AI Agent 任務競標市場 (Hub Market)
 import uuid
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from loguru import logger
 from enum import Enum
 
@@ -28,7 +28,8 @@ class Task:
     status: TaskStatus = TaskStatus.OPEN
     assigned_to: Optional[str] = None
     result: Optional[str] = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: Optional[datetime] = field(default=None)
 
 @dataclass
 class Bid:
@@ -49,18 +50,20 @@ class HubMarket:
         logger.info("🏪 Hub Market 初始化完成 (純算法规則)")
 
     def create_task(self, description: str, input_data: str, max_budget: float, 
-                    expected_tokens: int, requester_id: str = "buyer_001") -> Task:
+                    expected_tokens: int, requester_id: str = "buyer_001",
+                    expires_in_hours: int = 24) -> Task:
         task = Task(
             task_id=str(uuid.uuid4())[:8],
             requester_id=requester_id,
             description=description,
             input_data=input_data,
             max_budget=max_budget,
-            expected_tokens=expected_tokens
+            expected_tokens=expected_tokens,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
         )
         self.tasks[task.task_id] = task
         self.bids[task.task_id] = []
-        logger.info(f"📢 [Market] 新任務：{task.task_id} | 預算：{max_budget} SOL")
+        logger.info(f"📢 [Market] 新任務：{task.task_id} | 預算：{max_budget} SOL | 過期：{expires_in_hours}h")
         return task
 
     def submit_bid(self, task_id: str, bidder_id: str, bid_price: float, 
@@ -102,16 +105,33 @@ class HubMarket:
         task.status = TaskStatus.COMPLETED
         logger.info(f"✅ [Market] 任務 {task_id} 已完成")
 
+    def expire_old_tasks(self):
+        """自動過期超時任務"""
+        now = datetime.now(timezone.utc)
+        expired_count = 0
+        for task in self.tasks.values():
+            if task.status == TaskStatus.OPEN and task.expires_at and now > task.expires_at:
+                task.status = TaskStatus.FAILED
+                expired_count += 1
+        if expired_count > 0:
+            logger.info(f"🧹 [Market] 已過期 {expired_count} 個任務")
+        return expired_count
+
     def get_market_stats(self) -> Dict:
         total_tasks = len(self.tasks)
         total_bids = sum(len(b) for b in self.bids.values())
         winning_bids = [b.bid_price for t in self.tasks.values() if t.assigned_to for b in self.bids.get(t.task_id, []) if b.bidder_id == t.assigned_to]
         avg_winning_bid = sum(winning_bids) / len(winning_bids) if winning_bids else 0
+        
+        # 過期舊任務
+        self.expire_old_tasks()
+        
         return {
             "total_tasks": total_tasks,
             "total_bids": total_bids,
             "avg_winning_bid": avg_winning_bid,
-            "active_tasks": len([t for t in self.tasks.values() if t.status == TaskStatus.OPEN])
+            "active_tasks": len([t for t in self.tasks.values() if t.status == TaskStatus.OPEN]),
+            "expired_tasks": len([t for t in self.tasks.values() if t.status == TaskStatus.FAILED])
         }
 
 market = HubMarket()

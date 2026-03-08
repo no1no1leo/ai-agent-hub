@@ -9,11 +9,13 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from loguru import logger
 import uvicorn
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .hub_market import HubMarket, TaskStatus, market
 from .reputation import reputation_system
 from .solana_escrow import solana_escrow
+from .metrics import update_market_metrics, tasks_created, bids_submitted
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 app = FastAPI(title="AI Agent Marketplace", version="2.1.0")
 
@@ -96,6 +98,10 @@ async def create_task(request: CreateTaskRequest):
         # 記錄幣別 (模擬)
         if hasattr(task, 'currency'):
             task.currency = request.currency
+        
+        # 追蹤 Prometheus 指標
+        tasks_created.labels(currency=request.currency).inc()
+        
         return {"task_id": task.task_id, "status": "created", "currency": request.currency}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -251,14 +257,23 @@ async def landing_page(request: Request):
     """
     return HTMLResponse(content=html_content)
 
+# === Prometheus 指標端點 ===
+@app.get("/metrics")
+async def metrics():
+    """Prometheus 監控指標"""
+    update_market_metrics(market, solana_escrow)
+    from fastapi.responses import Response
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
 # === 健康檢查端點 ===
 @app.get("/health")
 async def health_check():
     """系統健康檢查"""
+    update_market_metrics(market, solana_escrow)
     return {
         "status": "healthy",
         "version": "2.1.0",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "market": {
             "total_tasks": len(market.tasks),
             "active_tasks": len([t for t in market.tasks.values() if t.status.value == "open"])

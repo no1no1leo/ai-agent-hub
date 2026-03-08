@@ -5,7 +5,7 @@ Solana 智能合約整合 (模擬層)
 import uuid
 from typing import Dict, Optional, List
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from loguru import logger
 from enum import Enum
 
@@ -26,7 +26,7 @@ class EscrowAccount:
     seller_id: str
     amount: float  # SOL
     status: EscrowStatus = EscrowStatus.CREATED
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = None
 
 class SolanaEscrowSimulator:
@@ -83,7 +83,7 @@ class SolanaEscrowSimulator:
         
         if approved:
             escrow.status = EscrowStatus.COMPLETED
-            escrow.completed_at = datetime.utcnow()
+            escrow.completed_at = datetime.now(timezone.utc)
             self.total_value_locked -= escrow.amount
             logger.info(f"✅ [Solana] 任務完成！{escrow.amount} SOL 已釋放給 {escrow.seller_id}")
         else:
