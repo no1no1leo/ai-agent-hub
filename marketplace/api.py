@@ -111,8 +111,8 @@ async def landing_page(request: Request):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Agent Trading Hub</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://unpkg.com/axios@1.6.2/dist/axios.min.js"></script>
     <style>
         body { background-color: #0f172a; color: #fff; font-family: 'Inter', sans-serif; }
         .gradient-text { background: linear-gradient(to right, #6366f1, #a855f7, #ec4899); -webkit-background-clip: text; color: transparent; }
@@ -211,26 +211,40 @@ async def landing_page(request: Request):
     </div>
 
     <script>
-        const { createApp } = Vue;
-        createApp({
-            data() {
-                return { tasks: [], bids: [], stats: { total_tasks: 0, total_bids: 0, avg_winning_bid_usdc: 0 } }
-            },
-            mounted() { this.fetchData(); setInterval(this.fetchData, 3000); },
-            methods: {
-                async fetchData() {
-                    try {
-                        const res = await axios.get('/api/dashboard-data');
-                        this.tasks = res.data.tasks;
-                        this.bids = res.data.bids;
-                        this.stats = res.data.stats;
-                    } catch (e) { console.error(e); }
+        document.addEventListener('DOMContentLoaded', function() {
+            const { createApp } = Vue;
+            createApp({
+                data() {
+                    return { 
+                        tasks: [], 
+                        bids: [], 
+                        stats: { total_tasks: 0, total_bids: 0, avg_winning_bid_usdc: 0 } 
+                    }
                 },
-                scrollToMarket() {
-                    document.getElementById('market-section').scrollIntoView({ behavior: 'smooth' });
+                mounted() { 
+                    console.log('Vue app mounted');
+                    this.fetchData(); 
+                    setInterval(this.fetchData, 3000); 
+                },
+                methods: {
+                    async fetchData() {
+                        try {
+                            console.log('Fetching data...');
+                            const res = await axios.get('/api/dashboard-data');
+                            console.log('Data received:', res.data);
+                            this.tasks = res.data.tasks;
+                            this.bids = res.data.bids;
+                            this.stats = res.data.stats;
+                        } catch (e) { 
+                            console.error('Fetch error:', e); 
+                        }
+                    },
+                    scrollToMarket() {
+                        document.getElementById('market-section').scrollIntoView({ behavior: 'smooth' });
+                    }
                 }
-            }
-        }).mount('#app');
+            }).mount('#app');
+        });
     </script>
 </body>
 </html>
