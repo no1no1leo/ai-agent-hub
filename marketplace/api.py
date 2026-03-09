@@ -3,13 +3,24 @@ AI Agent Marketplace Web API
 風格化首頁：參考 RentAHuman.ai 的極簡與衝擊力
 支援多穩定幣 (USDC) 計價
 """
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from loguru import logger
 import uvicorn
+import asyncio
+import json
 from datetime import datetime, timezone
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+# === 模組級常數 ===
+SOL_PRICE_USDC = 100.0  # 模擬匯率: 1 SOL = 100 USDC
+
+# === slowapi 速率限制器 ===
+limiter = Limiter(key_func=get_remote_address)
 
 from .hub_market import HubMarket, TaskStatus, market
 from .reputation import reputation_system
@@ -18,6 +29,44 @@ from .metrics import update_market_metrics, tasks_created, bids_submitted
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 app = FastAPI(title="AI Agent Marketplace", version="2.1.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# === CORS 中間件 (必須在所有路由之前) ===
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# === WebSocket 連線管理器 ===
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        dead = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                dead.append(connection)
+        for conn in dead:
+            self.disconnect(conn)
+
+manager = ConnectionManager()
 
 # === 數據模型 ===
 class CreateTaskRequest(BaseModel):
@@ -36,32 +85,21 @@ class CreateTaskRequest(BaseModel):
         return v.strip()
 
 # === API 端點 (JSON) ===
-from fastapi.middleware.cors import CORSMiddleware
-
-# 添加 CORS 支援
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 @app.get("/api/stats")
 async def get_stats_json():
     """獲取市場統計 - 預設以 USDC 計價"""
     base_stats = market.get_market_stats()
-    sol_price_usdc = 100.0  # 模擬匯率: 1 SOL = 100 USDC
     avg_sol = base_stats.get("avg_winning_bid", 0)
     
     return {
         "market": {
             **base_stats,
-            "avg_winning_bid_usdc": avg_sol * sol_price_usdc,
+            "avg_winning_bid_usdc": avg_sol * SOL_PRICE_USDC,
             "currency": "USDC"
         },
         "solana": solana_escrow.get_market_stats() if solana_escrow else {},
-        "exchange_rate": {"SOL_USDC": sol_price_usdc}
+        "exchange_rate": {"SOL_USDC": SOL_PRICE_USDC}
     }
 
 @app.get("/api/dashboard-data")
@@ -74,37 +112,338 @@ async def get_dashboard_data_json():
             bids.append({"task": tid, "bidder": b.bidder_id, "price": b.bid_price, "currency": getattr(b, 'currency', 'USDC')})
     
     base_stats = market.get_market_stats()
-    sol_price_usdc = 100.0
-    
+
     return {
         "tasks": tasks[-5:],
         "bids": bids[-5:],
         "stats": {
             "total_tasks": base_stats.get("total_tasks", 0),
             "total_bids": base_stats.get("total_bids", 0),
-            "avg_winning_bid_usdc": base_stats.get("avg_winning_bid", 0) * sol_price_usdc,
+            "avg_winning_bid_usdc": base_stats.get("avg_winning_bid", 0) * SOL_PRICE_USDC,
             "currency": "USDC"
         }
     }
 
+class BidRequest(BaseModel):
+    bidder_id: str
+    bid_price: float = Field(gt=0)
+    estimated_tokens: int = Field(gt=0)
+    model_name: str = "algo_v1"
+    message: Optional[str] = ""
+
+
 @app.post("/tasks", response_model=None)
-async def create_task(request: CreateTaskRequest):
+@limiter.limit("30/minute")
+async def create_task_root(request: Request, task_request: CreateTaskRequest):
+    """Create a task (alias for /api/tasks)"""
     try:
         task = market.create_task(
-            description=request.description, input_data=request.input_data,
-            max_budget=request.max_budget, expected_tokens=request.expected_tokens,
-            requester_id=request.requester_id
+            description=task_request.description, input_data=task_request.input_data,
+            max_budget=task_request.max_budget, expected_tokens=task_request.expected_tokens,
+            requester_id=task_request.requester_id
+        )
+        tasks_created.labels(currency=task_request.currency).inc()
+        asyncio.create_task(manager.broadcast({
+            "type": "task_created",
+            "task_id": task.task_id,
+            "description": task_request.description,
+            "budget": task_request.max_budget,
+            "currency": task_request.currency
+        }))
+        return {"task_id": task.task_id, "status": "created", "currency": task_request.currency}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/tasks")
+async def list_tasks(
+    status: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+    search: Optional[str] = None,
+    sort_by: str = "created_at",
+):
+    """Return tasks with optional status filter, full-text search, sorting, and pagination.
+
+    Query params:
+    - status: filter by task status value (e.g. "open", "assigned", "completed")
+    - page: 1-based page number (min 1, default 1)
+    - page_size: results per page (min 1, max 100, default 20)
+    - search: case-insensitive substring match against task description
+    - sort_by: "created_at" (newest first, default) | "budget" (highest first) | "bids" (most bids first)
+    """
+    # --- validate pagination bounds ---
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 1
+    if page_size > 100:
+        page_size = 100
+
+    all_tasks = list(market.tasks.values())
+
+    # --- filter: status ---
+    if status is not None:
+        all_tasks = [t for t in all_tasks if t.status.value == status]
+
+    # --- filter: search ---
+    if search is not None:
+        q_lower = search.lower().strip()
+        all_tasks = [t for t in all_tasks if q_lower in t.description.lower()]
+
+    # --- sort ---
+    if sort_by == "budget":
+        all_tasks.sort(key=lambda t: t.max_budget, reverse=True)
+    elif sort_by == "bids":
+        all_tasks.sort(key=lambda t: len(market.bids.get(t.task_id, [])), reverse=True)
+    else:
+        # default: created_at newest first
+        all_tasks.sort(key=lambda t: t.created_at, reverse=True)
+
+    # --- pagination ---
+    total = len(all_tasks)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    offset = (page - 1) * page_size
+    page_tasks = all_tasks[offset: offset + page_size]
+
+    return {
+        "tasks": [
+            {
+                "task_id": t.task_id,
+                "description": t.description,
+                "input_data": t.input_data,
+                "max_budget": t.max_budget,
+                "status": t.status.value,
+                "requester_id": t.requester_id,
+                "bid_count": len(market.bids.get(t.task_id, [])),
+                "created_at": t.created_at.isoformat(),
+            }
+            for t in page_tasks
+        ],
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+        },
+    }
+
+
+@app.get("/api/search")
+async def search_tasks(q: str, limit: int = 10):
+    """Quick search endpoint"""
+    q_lower = q.lower().strip()
+    results = [
+        {"task_id": t.task_id, "description": t.description, "budget": t.max_budget, "status": t.status.value}
+        for t in market.tasks.values()
+        if q_lower in t.description.lower()
+    ][:limit]
+    return {"query": q, "results": results, "count": len(results)}
+
+
+@app.get("/tasks/{task_id}")
+async def get_task(task_id: str):
+    """返回指定任務及其所有投標"""
+    if task_id not in market.tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    t = market.tasks[task_id]
+    bids = market.bids.get(task_id, [])
+    return {
+        "id": t.task_id,
+        "description": t.description,
+        "input_data": t.input_data,
+        "max_budget": t.max_budget,
+        "expected_tokens": t.expected_tokens,
+        "status": t.status.value,
+        "currency": getattr(t, 'currency', 'USDC'),
+        "requester_id": t.requester_id,
+        "assigned_to": t.assigned_to,
+        "result": t.result,
+        "created_at": t.created_at.isoformat(),
+        "expires_at": t.expires_at.isoformat() if t.expires_at else None,
+        "bids": [
+            {
+                "bid_id": b.bid_id,
+                "bidder_id": b.bidder_id,
+                "bid_price": b.bid_price,
+                "estimated_tokens": b.estimated_tokens,
+                "model_name": b.model_name,
+                "message": b.message,
+            }
+            for b in bids
+        ],
+    }
+
+
+@app.post("/tasks/{task_id}/bid", response_model=None)
+async def submit_bid(task_id: str, bid_request: BidRequest):
+    """對指定任務提交投標；投標數 >= 3 時自動執行得標選擇"""
+    if task_id not in market.tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    try:
+        bid = market.submit_bid(
+            task_id=task_id,
+            bidder_id=bid_request.bidder_id,
+            bid_price=bid_request.bid_price,
+            estimated_tokens=bid_request.estimated_tokens,
+            model_name=bid_request.model_name,
+            message=bid_request.message or "",
+        )
+        bids_submitted.labels(model=bid_request.model_name).inc()
+
+        asyncio.create_task(manager.broadcast({
+            "type": "bid_submitted",
+            "task_id": task_id,
+            "bidder_id": bid_request.bidder_id,
+            "bid_price": bid_request.bid_price
+        }))
+
+        winner = None
+        if len(market.bids[task_id]) >= 3:
+            winner_bid = market.select_winner(task_id)
+            if winner_bid:
+                winner = {
+                    "bid_id": winner_bid.bid_id,
+                    "bidder_id": winner_bid.bidder_id,
+                    "bid_price": winner_bid.bid_price,
+                    "model_name": winner_bid.model_name,
+                }
+
+        return {
+            "bid_id": bid.bid_id,
+            "task_id": task_id,
+            "bidder_id": bid.bidder_id,
+            "bid_price": bid.bid_price,
+            "estimated_tokens": bid.estimated_tokens,
+            "model_name": bid.model_name,
+            "message": bid.message,
+            "auto_winner": winner,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/tasks/{task_id}/select-winner", response_model=None)
+async def select_winner(task_id: str):
+    """手動觸發得標選擇，返回獲勝投標資訊"""
+    if task_id not in market.tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    winner = market.select_winner(task_id)
+    if winner is None:
+        raise HTTPException(status_code=404, detail="No valid bids found for winner selection")
+    return {
+        "winner": {
+            "bid_id": winner.bid_id,
+            "task_id": task_id,
+            "bidder_id": winner.bidder_id,
+            "bid_price": winner.bid_price,
+            "estimated_tokens": winner.estimated_tokens,
+            "model_name": winner.model_name,
+            "message": winner.message,
+        },
+        "task_status": market.tasks[task_id].status.value,
+        "assigned_to": market.tasks[task_id].assigned_to,
+    }
+
+
+@app.get("/tasks/{task_id}/bids")
+async def get_task_bids(task_id: str):
+    """返回指定任務的所有投標"""
+    if task_id not in market.tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    bids = market.bids.get(task_id, [])
+    return {
+        "task_id": task_id,
+        "bid_count": len(bids),
+        "bids": [
+            {
+                "bid_id": b.bid_id,
+                "bidder_id": b.bidder_id,
+                "bid_price": b.bid_price,
+                "estimated_tokens": b.estimated_tokens,
+                "model_name": b.model_name,
+                "message": b.message,
+            }
+            for b in bids
+        ],
+    }
+
+
+@app.get("/api/tasks")
+async def list_tasks_legacy():
+    """列出最近 20 個任務，供客戶端輪詢任務狀態 (舊版相容接口)"""
+    recent = list(market.tasks.values())[-20:]
+    return {
+        "tasks": [
+            {
+                "id": t.task_id,
+                "desc": t.description,
+                "budget": t.max_budget,
+                "status": t.status.value,
+                "currency": getattr(t, 'currency', 'USDC'),
+                "requester_id": t.requester_id,
+                "created_at": t.created_at.isoformat(),
+            }
+            for t in recent
+        ]
+    }
+
+
+@app.post("/api/tasks", response_model=None)
+@limiter.limit("30/minute")
+async def create_task(request: Request, task_request: CreateTaskRequest):
+    try:
+        task = market.create_task(
+            description=task_request.description, input_data=task_request.input_data,
+            max_budget=task_request.max_budget, expected_tokens=task_request.expected_tokens,
+            requester_id=task_request.requester_id
         )
         # 記錄幣別 (模擬)
         if hasattr(task, 'currency'):
-            task.currency = request.currency
-        
+            task.currency = task_request.currency
+
         # 追蹤 Prometheus 指標
-        tasks_created.labels(currency=request.currency).inc()
-        
-        return {"task_id": task.task_id, "status": "created", "currency": request.currency}
+        tasks_created.labels(currency=task_request.currency).inc()
+
+        asyncio.create_task(manager.broadcast({
+            "type": "task_created",
+            "task_id": task.task_id,
+            "description": task_request.description,
+            "budget": task_request.max_budget,
+            "currency": task_request.currency
+        }))
+
+        return {"task_id": task.task_id, "status": "created", "currency": task_request.currency}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# === WebSocket 即時市場動態 ===
+@app.websocket("/ws/market")
+async def websocket_market(websocket: WebSocket):
+    """Real-time market feed via WebSocket"""
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Send market snapshot every 2 seconds
+            stats = market.get_market_stats()
+            tasks_snapshot = [
+                {"id": t.task_id, "desc": t.description, "budget": t.max_budget,
+                 "status": t.status.value}
+                for t in list(market.tasks.values())[-5:]
+            ]
+            await websocket.send_json({
+                "type": "market_update",
+                "stats": stats,
+                "recent_tasks": tasks_snapshot,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception:
+        manager.disconnect(websocket)
 
 # === 人類可讀的首頁 (RentAHuman.ai 風格) ===
 @app.get("/", response_class=HTMLResponse)
@@ -225,6 +564,9 @@ async def landing_page(request: Request):
             <h2 class="text-3xl font-bold mb-8 flex items-center gap-2">
                 <span class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
                 即時市場動態
+                <span class="text-xs px-2 py-1 rounded-full" :class="wsConnected ? 'bg-green-900 text-green-300' : 'bg-yellow-900 text-yellow-300'">
+                    {{ wsStatus }}
+                </span>
             </h2>
             
             <!-- Recent Tasks -->
@@ -280,8 +622,8 @@ async def landing_page(request: Request):
             createApp({
                 data() {
                     return { 
-                        tasks: [], 
-                        bids: [], 
+                        tasks: [],
+                        bids: [],
                         stats: { total_tasks: 0, total_bids: 0, avg_winning_bid_usdc: 0 },
                         newTask: {
                             description: '',
@@ -292,15 +634,35 @@ async def landing_page(request: Request):
                             currency: 'USDC'
                         },
                         creating: false,
-                        createMessage: null
+                        createMessage: null,
+                        wsConnected: false,
+                        wsStatus: 'Disconnected'
                     }
                 },
-                mounted() { 
+                mounted() {
                     console.log('Vue app mounted');
-                    this.fetchData(); 
-                    setInterval(this.fetchData, 3000); 
+                    this.fetchData();
+                    setInterval(this.fetchData, 3000);
+                    this.connectWebSocket();
                 },
                 methods: {
+                    connectWebSocket() {
+                        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/market`);
+                        ws.onopen = () => { this.wsConnected = true; this.wsStatus = 'Live'; };
+                        ws.onmessage = (event) => {
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'market_update') {
+                                this.stats = data.stats;
+                                if (data.recent_tasks) this.tasks = data.recent_tasks;
+                            } else if (data.type === 'task_created' || data.type === 'bid_submitted') {
+                                this.fetchData();
+                            }
+                        };
+                        ws.onclose = () => { this.wsConnected = false; this.wsStatus = 'Reconnecting...'; setTimeout(() => this.connectWebSocket(), 3000); };
+                        ws.onerror = () => { this.wsConnected = false; };
+                        this.ws = ws;
+                    },
                     async fetchData() {
                         try {
                             console.log('Fetching data...');
@@ -323,7 +685,7 @@ async def landing_page(request: Request):
                         this.creating = true;
                         this.createMessage = null;
                         try {
-                            const res = await axios.post('/tasks', this.newTask);
+                            const res = await axios.post('/api/tasks', this.newTask);
                             console.log('Task created:', res.data);
                             this.createMessage = { type: 'success', text: '✅ 任務創建成功！ID: ' + res.data.task_id };
                             this.newTask.description = '';
@@ -379,7 +741,7 @@ async def health_check():
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"全局異常: {exc}")
-    return HTMLResponse(
+    return JSONResponse(
         status_code=500,
         content={"error": "內部伺服器錯誤", "detail": str(exc)}
     )

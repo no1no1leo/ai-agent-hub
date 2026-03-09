@@ -52,7 +52,7 @@ class LLMEngine:
         當 API 不可用時的模擬回應
         """
         last_msg = messages[-1]["content"] if messages else ""
-        if "價格" in last_msg or "價格" in last_msg:
+        if "價格" in last_msg or "price" in last_msg.lower():
             return "我認為這個價格很合理，可以接受。"
         return "我同意這個提議。"
 

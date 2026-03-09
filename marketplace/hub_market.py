@@ -49,9 +49,13 @@ class HubMarket:
         self.bids: Dict[str, List[Bid]] = {}
         logger.info("🏪 Hub Market 初始化完成 (純算法规則)")
 
-    def create_task(self, description: str, input_data: str, max_budget: float, 
+    def create_task(self, description: str, input_data: str, max_budget: float,
                     expected_tokens: int, requester_id: str = "buyer_001",
                     expires_in_hours: int = 24) -> Task:
+        if not description or not description.strip():
+            raise ValueError("Description cannot be empty")
+        if max_budget <= 0:
+            raise ValueError("Budget must be positive")
         task = Task(
             task_id=str(uuid.uuid4())[:8],
             requester_id=requester_id,
@@ -117,15 +121,20 @@ class HubMarket:
             logger.info(f"🧹 [Market] 已過期 {expired_count} 個任務")
         return expired_count
 
+    def get_task(self, task_id: str) -> Optional[Task]:
+        """Return a single task by ID, or None if not found."""
+        return self.tasks.get(task_id)
+
+    def get_bids_for_task(self, task_id: str) -> List[Bid]:
+        """Return all bids submitted for a given task."""
+        return self.bids.get(task_id, [])
+
     def get_market_stats(self) -> Dict:
         total_tasks = len(self.tasks)
         total_bids = sum(len(b) for b in self.bids.values())
         winning_bids = [b.bid_price for t in self.tasks.values() if t.assigned_to for b in self.bids.get(t.task_id, []) if b.bidder_id == t.assigned_to]
         avg_winning_bid = sum(winning_bids) / len(winning_bids) if winning_bids else 0
-        
-        # 過期舊任務
-        self.expire_old_tasks()
-        
+
         return {
             "total_tasks": total_tasks,
             "total_bids": total_bids,

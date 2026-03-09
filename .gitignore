@@ -1,3 +1,40 @@
+# Secrets
+.env
+*.env
+*.key
+*.pem
+*.json.secret
+moltbook_identity.json
+moltbook_agent.json
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
 venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

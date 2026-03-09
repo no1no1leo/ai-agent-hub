@@ -45,6 +45,8 @@ class MultiCurrencyWallet:
                     key_data = json.load(f)
                     if isinstance(key_data, list):
                         self.keypair = Keypair.from_bytes(bytes(key_data))
+                    elif isinstance(key_data, dict) and "secret_key" in key_data:
+                        self.keypair = Keypair.from_bytes(bytes(key_data["secret_key"]))
             else:
                 self.keypair = Keypair.from_base58_string(secret)
             
@@ -91,7 +93,7 @@ class MultiCurrencyWallet:
                 return float(balance_info.value.ui_amount) if balance_info.value.ui_amount else 0.0
             return 0.0
         except Exception as e:
-            # logger.error(f"查詢 {mint_symbol} 餘額失敗：{e}")
+            logger.warning(f"Failed to get {mint_symbol} balance: {e}")
             return 0.0
 
     def get_all_balances(self) -> Dict[str, float]:
