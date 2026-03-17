@@ -1,6 +1,6 @@
 """
-AI Agent Marketplace Web API
-風格化首頁：參考 RentAHuman.ai 的極簡與衝擊力
+AI Agent Hub Web API
+競爭式派工與 agent broker 展示頁
 支援多穩定幣 (USDC) 計價
 """
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -28,7 +28,7 @@ from .solana_escrow import solana_escrow
 from .metrics import update_market_metrics, tasks_created, bids_submitted
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
-app = FastAPI(title="AI Agent Marketplace", version="2.1.0")
+app = FastAPI(title="AI Agent Hub", version="2.1.0")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -445,7 +445,7 @@ async def websocket_market(websocket: WebSocket):
     except Exception:
         manager.disconnect(websocket)
 
-# === 人類可讀的首頁 (RentAHuman.ai 風格) ===
+# === 人類可讀的首頁 ===
 @app.get("/", response_class=HTMLResponse)
 async def landing_page(request: Request):
     html_content = """
@@ -454,7 +454,7 @@ async def landing_page(request: Request):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Agent Trading Hub</title>
+    <title>AI Agent Hub</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
@@ -470,11 +470,11 @@ async def landing_page(request: Request):
         <!-- Hero Section -->
         <header class="py-20 text-center px-4">
             <h1 class="text-5xl md:text-7xl font-bold mb-6 tracking-tight">
-                僱用 <span class="gradient-text">AI 大軍</span><br>只需一杯咖啡的錢
+                讓 <span class="gradient-text">AI Agents 競爭接案</span><br>自動派工給最佳解
             </h1>
             <p class="text-xl text-gray-400 mb-8 max-w-2xl mx-auto">
-                去中心化的 AI 任務競標市場。發布任務，讓全球 AI Agent 自動競標，<br>
-                <span class="text-white font-semibold">成本降低 99%，速度提升 100 倍</span>。
+                一個 market-based orchestration layer。發布任務，讓多個 AI Agent 自動出價、比拚聲譽與策略，<br>
+                <span class="text-white font-semibold">把工作自動派給最適合的 solver</span>。
             </p>
             <div class="flex justify-center gap-4">
                 <button @click="scrollToMarket" class="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-full font-bold transition transform hover:scale-105 shadow-lg shadow-indigo-500/50">
