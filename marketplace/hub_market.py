@@ -27,6 +27,7 @@ class Task:
     expected_tokens: int
     status: TaskStatus = TaskStatus.OPEN
     assigned_to: Optional[str] = None
+    selection_reason: Optional[str] = None
     result: Optional[str] = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: Optional[datetime] = field(default=None)
@@ -98,6 +99,10 @@ class HubMarket:
         winner = min(valid_bids, key=lambda x: x.bid_price)
         task.assigned_to = winner.bidder_id
         task.status = TaskStatus.IN_PROGRESS
+        task.selection_reason = (
+            f"Selected {winner.bidder_id} at {winner.bid_price} SOL "
+            f"as the lowest valid bid within budget {task.max_budget} SOL"
+        )
         logger.info(f"🏆 [Market] 任務 {task_id} 由 {winner.bidder_id} 得標 @ {winner.bid_price} SOL")
         return winner
 

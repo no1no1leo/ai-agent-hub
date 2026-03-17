@@ -218,6 +218,7 @@ async def list_tasks(
                 "status": t.status.value,
                 "requester_id": t.requester_id,
                 "bid_count": len(market.bids.get(t.task_id, [])),
+                "selection_reason": t.selection_reason,
                 "created_at": t.created_at.isoformat(),
             }
             for t in page_tasks
@@ -260,6 +261,7 @@ async def get_task(task_id: str):
         "currency": getattr(t, 'currency', 'USDC'),
         "requester_id": t.requester_id,
         "assigned_to": t.assigned_to,
+        "selection_reason": t.selection_reason,
         "result": t.result,
         "created_at": t.created_at.isoformat(),
         "expires_at": t.expires_at.isoformat() if t.expires_at else None,
