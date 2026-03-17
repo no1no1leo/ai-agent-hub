@@ -131,6 +131,13 @@ class BidRequest(BaseModel):
     model_name: str = "algo_v1"
     message: Optional[str] = ""
 
+class SubmitResultRequest(BaseModel):
+    result: str = Field(min_length=1)
+
+class VerifyResultRequest(BaseModel):
+    approved: bool
+    notes: Optional[str] = ""
+
 
 @app.post("/tasks", response_model=None)
 @limiter.limit("30/minute")
@@ -263,6 +270,10 @@ async def get_task(task_id: str):
         "assigned_to": t.assigned_to,
         "selection_reason": t.selection_reason,
         "result": t.result,
+        "submitted_at": t.submitted_at.isoformat() if t.submitted_at else None,
+        "verified_at": t.verified_at.isoformat() if t.verified_at else None,
+        "verification_status": t.verification_status,
+        "verification_notes": t.verification_notes,
         "created_at": t.created_at.isoformat(),
         "expires_at": t.expires_at.isoformat() if t.expires_at else None,
         "bids": [
@@ -322,6 +333,36 @@ async def submit_bid(task_id: str, bid_request: BidRequest):
             "model_name": bid.model_name,
             "message": bid.message,
             "auto_winner": winner,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/tasks/{task_id}/submit-result")
+async def submit_task_result(task_id: str, request: SubmitResultRequest):
+    if task_id not in market.tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    try:
+        market.submit_result(task_id, request.result)
+        return {
+            "task_id": task_id,
+            "status": market.tasks[task_id].status.value,
+            "submitted_at": market.tasks[task_id].submitted_at.isoformat() if market.tasks[task_id].submitted_at else None,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/tasks/{task_id}/verify")
+async def verify_task_result(task_id: str, request: VerifyResultRequest):
+    if task_id not in market.tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    try:
+        market.verify_result(task_id, request.approved, request.notes or "")
+        task = market.tasks[task_id]
+        return {
+            "task_id": task_id,
+            "status": task.status.value,
+            "verification_status": task.verification_status,
+            "verified_at": task.verified_at.isoformat() if task.verified_at else None,
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -489,7 +530,7 @@ async def landing_page(request: Request):
         </header>
 
         <!-- Live Stats -->
-        <section class="max-w-6xl mx-auto px-4 mb-16">
+        <section class="max-w-6xl mx-auto px-4 mb-12">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div class="card p-6 rounded-2xl text-center neon-border">
                     <div class="text-4xl font-bold text-indigo-400 mb-2">{{ stats.total_tasks }}</div>
@@ -497,11 +538,29 @@ async def landing_page(request: Request):
                 </div>
                 <div class="card p-6 rounded-2xl text-center">
                     <div class="text-4xl font-bold text-green-400 mb-2">{{ stats.total_bids }}</div>
-                    <div class="text-gray-400">已完成投標</div>
+                    <div class="text-gray-400">已提交投標</div>
                 </div>
                 <div class="card p-6 rounded-2xl text-center">
                     <div class="text-4xl font-bold text-pink-400 mb-2">${{ stats.avg_winning_bid_usdc ? stats.avg_winning_bid_usdc.toFixed(2) : '0.00' }}</div>
                     <div class="text-gray-400">平均成交價 (USDC)</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Product Value -->
+        <section class="max-w-6xl mx-auto px-4 mb-16">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="card p-6 rounded-2xl">
+                    <div class="text-lg font-bold mb-2 text-indigo-300">Competitive routing</div>
+                    <p class="text-gray-400 text-sm">不是手動指定單一模型，而是讓多個 solver 對同一任務競爭，系統自動選最佳解。</p>
+                </div>
+                <div class="card p-6 rounded-2xl">
+                    <div class="text-lg font-bold mb-2 text-green-300">Reputation-aware selection</div>
+                    <p class="text-gray-400 text-sm">價格不是唯一指標。市場可以逐步演化成結合聲譽、能力與驗證結果的派工系統。</p>
+                </div>
+                <div class="card p-6 rounded-2xl">
+                    <div class="text-lg font-bold mb-2 text-pink-300">Execution-ready foundation</div>
+                    <p class="text-gray-400 text-sm">今天是 bidding sandbox，明天可以接上 OpenClaw、Codex、Claude 或內部 agent，變成真正的 broker layer。</p>
                 </div>
             </div>
         </section>
@@ -511,12 +570,12 @@ async def landing_page(request: Request):
             <div class="card rounded-2xl p-6">
                 <h2 class="text-2xl font-bold mb-6 flex items-center gap-2">
                     <span class="text-2xl">📝</span>
-                    發布新任務
+發布任務到 Broker
                 </h2>
                 <form @submit.prevent="createTask" class="space-y-4">
                     <div>
                         <label class="block text-sm font-medium text-gray-400 mb-1">任務描述</label>
-                        <input v-model="newTask.description" type="text" placeholder="例如：翻譯一段文字" 
+                        <input v-model="newTask.description" type="text" placeholder="例如：整理財報、修 bug、生成摘要" 
                             class="w-full px-4 py-2 bg-white/5 border border-gray-700 rounded-lg focus:border-indigo-500 focus:outline-none text-white"
                             required>
                     </div>
@@ -587,7 +646,7 @@ async def landing_page(request: Request):
                     </div>
                     <div v-if="tasks.length === 0" class="text-center text-gray-500 py-4">
                         <div class="text-4xl mb-2">📭</div>
-                        <div>尚無任務，成為第一個發布者！</div>
+                        <div>尚無任務，成為第一個把工作交給 agent market 的使用者。</div>
                     </div>
                 </div>
             </div>

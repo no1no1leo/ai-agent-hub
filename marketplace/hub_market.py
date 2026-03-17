@@ -13,6 +13,8 @@ from enum import Enum
 class TaskStatus(Enum):
     OPEN = "open"
     IN_PROGRESS = "in_progress"
+    SUBMITTED = "submitted"
+    VERIFIED = "verified"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -29,6 +31,10 @@ class Task:
     assigned_to: Optional[str] = None
     selection_reason: Optional[str] = None
     result: Optional[str] = None
+    submitted_at: Optional[datetime] = None
+    verified_at: Optional[datetime] = None
+    verification_status: Optional[str] = None
+    verification_notes: Optional[str] = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: Optional[datetime] = field(default=None)
 
@@ -105,6 +111,30 @@ class HubMarket:
         )
         logger.info(f"🏆 [Market] 任務 {task_id} 由 {winner.bidder_id} 得標 @ {winner.bid_price} SOL")
         return winner
+
+    def submit_result(self, task_id: str, result: str):
+        if task_id not in self.tasks:
+            raise ValueError("Task not found")
+        task = self.tasks[task_id]
+        task.result = result
+        task.status = TaskStatus.SUBMITTED
+        task.submitted_at = datetime.now(timezone.utc)
+        logger.info(f"📨 [Market] 任務 {task_id} 已提交結果")
+
+    def verify_result(self, task_id: str, approved: bool, notes: str = ""):
+        if task_id not in self.tasks:
+            raise ValueError("Task not found")
+        task = self.tasks[task_id]
+        task.verified_at = datetime.now(timezone.utc)
+        task.verification_notes = notes
+        if approved:
+            task.verification_status = "approved"
+            task.status = TaskStatus.COMPLETED
+            logger.info(f"✅ [Market] 任務 {task_id} 驗證通過")
+        else:
+            task.verification_status = "rejected"
+            task.status = TaskStatus.FAILED
+            logger.info(f"❌ [Market] 任務 {task_id} 驗證失敗")
 
     def complete_task(self, task_id: str, result: str):
         if task_id not in self.tasks:

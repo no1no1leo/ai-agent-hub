@@ -94,6 +94,21 @@ class TestHubMarket:
         assert self.market.tasks[task.task_id].status == TaskStatus.COMPLETED
         assert self.market.tasks[task.task_id].result == "Task complete result"
 
+    def test_submit_and_verify_result(self):
+        task = self.market.create_task("Test", "data", 1.0, 1000)
+        self.market.submit_bid(task.task_id, "agent_01", 0.5, 1000, "model")
+        self.market.select_winner(task.task_id)
+
+        self.market.submit_result(task.task_id, "intermediate result")
+        assert self.market.tasks[task.task_id].status == TaskStatus.SUBMITTED
+        assert self.market.tasks[task.task_id].submitted_at is not None
+
+        self.market.verify_result(task.task_id, approved=True, notes="looks good")
+        assert self.market.tasks[task.task_id].status == TaskStatus.COMPLETED
+        assert self.market.tasks[task.task_id].verification_status == "approved"
+        assert self.market.tasks[task.task_id].verified_at is not None
+        assert self.market.tasks[task.task_id].verification_notes == "looks good"
+
     def test_get_market_stats(self):
         task1 = self.market.create_task("Test 1", "data1", 1.0, 1000)
         task2 = self.market.create_task("Test 2", "data2", 2.0, 2000)
