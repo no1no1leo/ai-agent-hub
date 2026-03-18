@@ -331,6 +331,34 @@ class TestDashboardApi:
         assert found["verification_status"] == "approved"
         assert found["submitted_at"] is not None
         assert found["verified_at"] is not None
+        assert found["budget_limit"] == 1.0
+        assert found["cost_unit"] == "internal_units"
+
+    def test_api_accepts_internal_budget_and_estimated_cost_aliases(self, test_client):
+        api_market.tasks.clear()
+        api_market.bids.clear()
+
+        create_res = test_client.post("/tasks", json={
+            "description": "Internal routing task",
+            "input_data": "input.txt",
+            "budget_limit": 2.0,
+            "expected_tokens": 500,
+            "requester_id": "internal_requester"
+        })
+        assert create_res.status_code == 200
+        task_id = create_res.json()["task_id"]
+        assert create_res.json()["budget_limit"] == 2.0
+
+        bid_res = test_client.post(f"/tasks/{task_id}/bid", json={
+            "bidder_id": "agent_internal",
+            "estimated_cost": 0.75,
+            "estimated_tokens": 450,
+            "model_name": "algo_v1"
+        })
+        assert bid_res.status_code == 200
+        body = bid_res.json()
+        assert body["estimated_cost"] == 0.75
+        assert body["cost_unit"] == "internal_units"
 
 
 class TestEdgeCases:

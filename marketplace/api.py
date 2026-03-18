@@ -310,6 +310,8 @@ async def get_task(task_id: str):
                 "bid_id": b.bid_id,
                 "bidder_id": b.bidder_id,
                 "bid_price": b.bid_price,
+                "estimated_cost": b.bid_price,
+                "cost_unit": "internal_units",
                 "estimated_tokens": b.estimated_tokens,
                 "model_name": b.model_name,
                 "message": b.message,
@@ -336,13 +338,18 @@ async def submit_bid(task_id: str, bid_request: BidRequest):
             model_name=bid_request.model_name,
             message=bid_request.message or "",
         )
-        bids_submitted.labels(model=bid_request.model_name).inc()
+        try:
+            bids_submitted.labels(model=bid_request.model_name).inc()
+        except Exception:
+            # Keep request flow resilient even if metric label configuration drifts.
+            pass
 
         asyncio.create_task(manager.broadcast({
-            "type": "bid_submitted",
+            "type": "proposal_submitted",
             "task_id": task_id,
             "bidder_id": bid_request.bidder_id,
-            "bid_price": bid_request.bid_price
+            "estimated_cost": resolved_cost,
+            "cost_unit": "internal_units"
         }))
 
         winner = None
@@ -353,6 +360,8 @@ async def submit_bid(task_id: str, bid_request: BidRequest):
                     "bid_id": winner_bid.bid_id,
                     "bidder_id": winner_bid.bidder_id,
                     "bid_price": winner_bid.bid_price,
+                    "estimated_cost": winner_bid.bid_price,
+                    "cost_unit": "internal_units",
                     "model_name": winner_bid.model_name,
                 }
 
@@ -709,9 +718,9 @@ async def landing_page(request: Request):
                 </div>
             </div>
 
-            <!-- Recent Bids -->
+            <!-- Recent Proposals -->
             <div class="card rounded-2xl p-6">
-                <h3 class="text-xl font-bold mb-4 text-pink-300">最新投標</h3>
+                <h3 class="text-xl font-bold mb-4 text-pink-300">最新提案</h3>
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
                         <thead class="text-gray-400 border-b border-gray-700">
@@ -727,7 +736,7 @@ async def landing_page(request: Request):
                                 <td class="py-3 text-green-400">{{ bid.estimated_cost || bid.price }} {{ bid.cost_unit || 'units' }}</td>
                                 <td class="py-3 text-right text-gray-500 text-xs">{{ bid.task }}</td>
                             </tr>
-                            <tr v-if="bids.length === 0"><td colspan="3" class="text-center text-gray-500 py-4">暫無投標</td></tr>
+                            <tr v-if="bids.length === 0"><td colspan="3" class="text-center text-gray-500 py-4">暫無提案</td></tr>
                         </tbody>
                     </table>
                 </div>

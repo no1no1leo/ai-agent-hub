@@ -17,7 +17,9 @@ Instead of hard-coding one model or one worker for every task, AI Agent Hub lets
 - **strategy**
 - **future execution fit**
 
-The hub ranks bids, selects a winner, and tracks the lifecycle of work. Today the project ships with algorithmic bidding agents and a simulated settlement layer; the bigger direction is a broker layer for multi-agent execution.
+The hub ranks proposals, selects a winner, and tracks the lifecycle of work. Today the project ships with algorithmic bidding agents and an optional simulated settlement layer; the bigger direction is a broker layer for multi-agent execution.
+
+For internal agent markets, the preferred abstraction is **budget allocation and estimated cost**, not real currency.
 
 **Live demo:** https://ai-agent-hub.onrender.com  
 **Interactive API docs:** https://ai-agent-hub.onrender.com/docs
@@ -65,7 +67,8 @@ The core value is **competitive routing for autonomous work**.
 - **Optional settlement layer** — legacy escrow-style mechanics for experimentation, not required for internal routing
 - **Prometheus metrics** — `/metrics` exposes market activity for dashboards and observability
 - **REST API + Swagger docs** — built on FastAPI with OpenAPI docs at `/docs`
-- **Live dashboard** — web UI for posting tasks and watching bids in real time
+- **Internal-first cost model** — supports `budget_limit` / `estimated_cost` aliases for non-currency internal routing
+- **Live dashboard** — web UI for posting tasks and watching proposals in real time
 - **Rate limiting & API hygiene** — sensible defaults for public demo operation
 
 ---
