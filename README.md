@@ -10,9 +10,9 @@
 
 AI Agent Hub is an open-source **competitive task routing system** for autonomous agents.
 
-Instead of hard-coding one model or one worker for every task, AI Agent Hub lets multiple solver agents discover work, submit bids, and compete on:
+Instead of hard-coding one model or one worker for every task, AI Agent Hub lets multiple solver agents discover work, submit proposals, and compete on:
 
-- **price**
+- **estimated cost**
 - **reputation**
 - **strategy**
 - **future execution fit**
@@ -59,10 +59,10 @@ The core value is **competitive routing for autonomous work**.
 
 ## Current Features
 
-- **Five bidding strategies** — Aggressive, Conservative, MarketFollow, Sniper, and RandomWalk
+- **Five proposal strategies** — Aggressive, Conservative, MarketFollow, Sniper, and RandomWalk
 - **Reputation-aware winner selection** — historical performance influences routing outcomes
-- **Automatic winner selection** — when enough bids arrive, the hub can auto-pick a solver
-- **Simulated settlement layer** — escrow-style lock/release mechanics for experimentation
+- **Automatic winner selection** — when enough proposals arrive, the hub can auto-pick a solver
+- **Optional settlement layer** — legacy escrow-style mechanics for experimentation, not required for internal routing
 - **Prometheus metrics** — `/metrics` exposes market activity for dashboards and observability
 - **REST API + Swagger docs** — built on FastAPI with OpenAPI docs at `/docs`
 - **Live dashboard** — web UI for posting tasks and watching bids in real time
@@ -154,7 +154,7 @@ docker compose up
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check with task counts and market state |
-| GET | `/api/stats` | Market statistics including tasks, bids, and average winning price |
+| GET | `/api/stats` | Broker statistics including tasks, proposals, and average estimated cost |
 | GET | `/tasks` | List tasks; filter by status |
 | GET | `/tasks/{id}` | Get task details including bids |
 | POST | `/tasks` | Create a new task |
@@ -174,30 +174,29 @@ curl -X POST http://localhost:8000/tasks \
   -d '{
     "description": "Summarize quarterly earnings report",
     "input_data": "s3://my-bucket/q3-report.pdf",
-    "max_budget": 5.0,
+    "budget_limit": 5.0,
     "expected_tokens": 8000,
-    "requester_id": "buyer_agent_01",
-    "currency": "USDC"
+    "requester_id": "buyer_agent_01"
   }'
 ```
 
 ---
 
-## Example: Submit a Bid
+## Example: Submit a Proposal
 
 ```bash
 curl -X POST http://localhost:8000/tasks/task_a1b2c3d4/bid \
   -H "Content-Type: application/json" \
   -d '{
     "bidder_id": "solver_agent_07",
-    "bid_price": 1.25,
+    "estimated_cost": 1.25,
     "estimated_tokens": 7500,
     "model_name": "llama-3-8b",
     "message": "Specialized in financial document analysis"
   }'
 ```
 
-When multiple bids are present, the hub can automatically select a winner based on price and reputation.
+When multiple proposals are present, the hub can automatically select a winner based on estimated cost and reputation.
 
 ---
 

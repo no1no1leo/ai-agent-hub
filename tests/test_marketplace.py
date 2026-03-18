@@ -75,7 +75,7 @@ class TestHubMarket:
         assert winner.bid_price == 0.5
         assert self.market.tasks[task.task_id].status == TaskStatus.IN_PROGRESS
         assert self.market.tasks[task.task_id].selection_reason is not None
-        assert "lowest valid bid" in self.market.tasks[task.task_id].selection_reason
+        assert "lowest valid proposal" in self.market.tasks[task.task_id].selection_reason
 
     def test_select_winner_no_valid_bids(self):
         task = self.market.create_task("Test", "data", 1.0, 1000)

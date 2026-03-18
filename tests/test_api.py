@@ -118,6 +118,14 @@ VALID_TASK_PAYLOAD = {
     "currency": "USDC",
 }
 
+INTERNAL_TASK_PAYLOAD = {
+    "description": "Internal routing task",
+    "input_data": "notes.txt",
+    "budget_limit": 2.0,
+    "expected_tokens": 400,
+    "requester_id": "internal_user",
+}
+
 
 class TestCreateTaskEndpoint:
     """POST /tasks"""
@@ -180,6 +188,13 @@ class TestCreateTaskEndpoint:
         with TestClient(app) as client:
             response = client.post("/tasks", json=payload)
             assert response.status_code == 422
+
+    def test_create_task_with_budget_limit_alias(self):
+        with TestClient(app) as client:
+            response = client.post("/tasks", json=INTERNAL_TASK_PAYLOAD)
+            assert response.status_code in (200, 201)
+            body = response.json()
+            assert body.get("budget_limit") == 2.0
 
 
 # ---------------------------------------------------------------------------

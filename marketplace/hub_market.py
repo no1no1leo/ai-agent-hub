@@ -74,7 +74,7 @@ class HubMarket:
         )
         self.tasks[task.task_id] = task
         self.bids[task.task_id] = []
-        logger.info(f"📢 [Market] 新任務：{task.task_id} | 預算：{max_budget} SOL | 過期：{expires_in_hours}h")
+        logger.info(f"📢 [Broker] 新任務：{task.task_id} | 預算上限：{max_budget} units | 過期：{expires_in_hours}h")
         return task
 
     def submit_bid(self, task_id: str, bidder_id: str, bid_price: float, 
@@ -91,7 +91,7 @@ class HubMarket:
             message=message
         )
         self.bids[task_id].append(bid)
-        logger.info(f"💰 [Market] 新投標：{bid.bid_id} by {bidder_id} @ {bid_price} SOL")
+        logger.info(f"🧮 [Broker] 新提案：{bid.bid_id} by {bidder_id} @ {bid_price} cost units")
         return bid
 
     def select_winner(self, task_id: str) -> Optional[Bid]:
@@ -100,16 +100,16 @@ class HubMarket:
         task = self.tasks[task_id]
         valid_bids = [b for b in self.bids[task_id] if b.bid_price <= task.max_budget]
         if not valid_bids:
-            logger.warning(f"⚠️ 無有效投標 (預算：{task.max_budget})")
+            logger.warning(f"⚠️ 無有效提案 (預算上限：{task.max_budget})")
             return None
         winner = min(valid_bids, key=lambda x: x.bid_price)
         task.assigned_to = winner.bidder_id
         task.status = TaskStatus.IN_PROGRESS
         task.selection_reason = (
-            f"Selected {winner.bidder_id} at {winner.bid_price} SOL "
-            f"as the lowest valid bid within budget {task.max_budget} SOL"
+            f"Selected {winner.bidder_id} with estimated cost {winner.bid_price} "
+            f"as the lowest valid proposal within budget limit {task.max_budget}"
         )
-        logger.info(f"🏆 [Market] 任務 {task_id} 由 {winner.bidder_id} 得標 @ {winner.bid_price} SOL")
+        logger.info(f"🏆 [Broker] 任務 {task_id} 指派給 {winner.bidder_id} @ estimated cost {winner.bid_price}")
         return winner
 
     def submit_result(self, task_id: str, result: str):

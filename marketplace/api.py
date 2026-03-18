@@ -72,10 +72,11 @@ manager = ConnectionManager()
 class CreateTaskRequest(BaseModel):
     description: str
     input_data: str
-    max_budget: float = Field(gt=0, description="預算必須大於 0")
+    max_budget: Optional[float] = Field(default=None, gt=0, description="預算必須大於 0")
+    budget_limit: Optional[float] = Field(default=None, gt=0, description="Internal mode budget limit")
     expected_tokens: int = Field(gt=0, description="預期 token 數必須大於 0")
     requester_id: Optional[str] = "anonymous"
-    currency: Optional[str] = "USDC"  # 預設 USDC
+    currency: Optional[str] = "USDC"  # legacy / external mode only
     
     @field_validator('description')
     @classmethod
@@ -88,14 +89,16 @@ class CreateTaskRequest(BaseModel):
 
 @app.get("/api/stats")
 async def get_stats_json():
-    """獲取市場統計 - 預設以 USDC 計價"""
+    """獲取 broker 統計資料"""
     base_stats = market.get_market_stats()
     avg_sol = base_stats.get("avg_winning_bid", 0)
-    
+
     return {
         "market": {
             **base_stats,
+            "avg_estimated_cost": avg_sol,
             "avg_winning_bid_usdc": avg_sol * SOL_PRICE_USDC,
+            "cost_unit": "internal_units",
             "currency": "USDC"
         },
         "solana": solana_escrow.get_market_stats() if solana_escrow else {},
@@ -110,7 +113,9 @@ async def get_dashboard_data_json():
             "id": t.task_id,
             "desc": t.description,
             "budget": t.max_budget,
+            "budget_limit": t.max_budget,
             "status": t.status.value,
+            "cost_unit": "internal_units",
             "currency": getattr(t, 'currency', 'USDC'),
             "assigned_to": t.assigned_to,
             "selection_reason": t.selection_reason,
@@ -123,7 +128,7 @@ async def get_dashboard_data_json():
     bids = []
     for tid, blist in market.bids.items():
         for b in blist:
-            bids.append({"task": tid, "bidder": b.bidder_id, "price": b.bid_price, "currency": getattr(b, 'currency', 'USDC')})
+            bids.append({"task": tid, "bidder": b.bidder_id, "price": b.bid_price, "estimated_cost": b.bid_price, "cost_unit": "internal_units", "currency": getattr(b, 'currency', 'USDC')})
 
     base_stats = market.get_market_stats()
 
@@ -133,14 +138,17 @@ async def get_dashboard_data_json():
         "stats": {
             "total_tasks": base_stats.get("total_tasks", 0),
             "total_bids": base_stats.get("total_bids", 0),
+            "avg_estimated_cost": base_stats.get("avg_winning_bid", 0),
             "avg_winning_bid_usdc": base_stats.get("avg_winning_bid", 0) * SOL_PRICE_USDC,
+            "cost_unit": "internal_units",
             "currency": "USDC"
         }
     }
 
 class BidRequest(BaseModel):
     bidder_id: str
-    bid_price: float = Field(gt=0)
+    bid_price: Optional[float] = Field(default=None, gt=0)
+    estimated_cost: Optional[float] = Field(default=None, gt=0)
     estimated_tokens: int = Field(gt=0)
     model_name: str = "algo_v1"
     message: Optional[str] = ""
@@ -158,9 +166,12 @@ class VerifyResultRequest(BaseModel):
 async def create_task_root(request: Request, task_request: CreateTaskRequest):
     """Create a task (alias for /api/tasks)"""
     try:
+        resolved_budget = task_request.budget_limit or task_request.max_budget
+        if resolved_budget is None:
+            raise ValueError("Either max_budget or budget_limit must be provided")
         task = market.create_task(
             description=task_request.description, input_data=task_request.input_data,
-            max_budget=task_request.max_budget, expected_tokens=task_request.expected_tokens,
+            max_budget=resolved_budget, expected_tokens=task_request.expected_tokens,
             requester_id=task_request.requester_id
         )
         tasks_created.labels(currency=task_request.currency).inc()
@@ -168,10 +179,11 @@ async def create_task_root(request: Request, task_request: CreateTaskRequest):
             "type": "task_created",
             "task_id": task.task_id,
             "description": task_request.description,
-            "budget": task_request.max_budget,
+            "budget": resolved_budget,
+            "budget_limit": resolved_budget,
             "currency": task_request.currency
         }))
-        return {"task_id": task.task_id, "status": "created", "currency": task_request.currency}
+        return {"task_id": task.task_id, "status": "created", "budget_limit": resolved_budget, "currency": task_request.currency}
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
@@ -236,6 +248,7 @@ async def list_tasks(
                 "description": t.description,
                 "input_data": t.input_data,
                 "max_budget": t.max_budget,
+                "budget_limit": t.max_budget,
                 "status": t.status.value,
                 "requester_id": t.requester_id,
                 "bid_count": len(market.bids.get(t.task_id, [])),
@@ -258,7 +271,7 @@ async def search_tasks(q: str, limit: int = 10):
     """Quick search endpoint"""
     q_lower = q.lower().strip()
     results = [
-        {"task_id": t.task_id, "description": t.description, "budget": t.max_budget, "status": t.status.value}
+        {"task_id": t.task_id, "description": t.description, "budget": t.max_budget, "budget_limit": t.max_budget, "status": t.status.value}
         for t in market.tasks.values()
         if q_lower in t.description.lower()
     ][:limit]
@@ -277,8 +290,10 @@ async def get_task(task_id: str):
         "description": t.description,
         "input_data": t.input_data,
         "max_budget": t.max_budget,
+        "budget_limit": t.max_budget,
         "expected_tokens": t.expected_tokens,
         "status": t.status.value,
+        "cost_unit": "internal_units",
         "currency": getattr(t, 'currency', 'USDC'),
         "requester_id": t.requester_id,
         "assigned_to": t.assigned_to,
@@ -310,10 +325,13 @@ async def submit_bid(task_id: str, bid_request: BidRequest):
     if task_id not in market.tasks:
         raise HTTPException(status_code=404, detail="Task not found")
     try:
+        resolved_cost = bid_request.estimated_cost or bid_request.bid_price
+        if resolved_cost is None:
+            raise HTTPException(status_code=422, detail="Either bid_price or estimated_cost must be provided")
         bid = market.submit_bid(
             task_id=task_id,
             bidder_id=bid_request.bidder_id,
-            bid_price=bid_request.bid_price,
+            bid_price=resolved_cost,
             estimated_tokens=bid_request.estimated_tokens,
             model_name=bid_request.model_name,
             message=bid_request.message or "",
@@ -343,6 +361,8 @@ async def submit_bid(task_id: str, bid_request: BidRequest):
             "task_id": task_id,
             "bidder_id": bid.bidder_id,
             "bid_price": bid.bid_price,
+            "estimated_cost": bid.bid_price,
+            "cost_unit": "internal_units",
             "estimated_tokens": bid.estimated_tokens,
             "model_name": bid.model_name,
             "message": bid.message,
@@ -555,8 +575,8 @@ async def landing_page(request: Request):
                     <div class="text-gray-400">已提交投標</div>
                 </div>
                 <div class="card p-6 rounded-2xl text-center">
-                    <div class="text-4xl font-bold text-pink-400 mb-2">${{ stats.avg_winning_bid_usdc ? stats.avg_winning_bid_usdc.toFixed(2) : '0.00' }}</div>
-                    <div class="text-gray-400">平均成交價 (USDC)</div>
+                    <div class="text-4xl font-bold text-pink-400 mb-2">{{ stats.avg_estimated_cost ? stats.avg_estimated_cost.toFixed(2) : '0.00' }}</div>
+                    <div class="text-gray-400">平均預估成本 (units)</div>
                 </div>
             </div>
         </section>
@@ -566,7 +586,7 @@ async def landing_page(request: Request):
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div class="card p-6 rounded-2xl">
                     <div class="text-lg font-bold mb-2 text-indigo-300">Competitive routing</div>
-                    <p class="text-gray-400 text-sm">不是手動指定單一模型，而是讓多個 solver 對同一任務競爭，系統自動選最佳解。</p>
+                    <p class="text-gray-400 text-sm">不是手動指定單一模型，而是讓多個 solver 對同一任務提交提案，系統自動選最佳解。</p>
                 </div>
                 <div class="card p-6 rounded-2xl">
                     <div class="text-lg font-bold mb-2 text-green-300">Reputation-aware selection</div>
@@ -600,7 +620,7 @@ async def landing_page(request: Request):
                                 class="w-full px-4 py-2 bg-white/5 border border-gray-700 rounded-lg focus:border-indigo-500 focus:outline-none text-white">
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-400 mb-1">預算 (USDC)</label>
+                            <label class="block text-sm font-medium text-gray-400 mb-1">Budget limit (internal units)</label>
                             <input v-model.number="newTask.max_budget" type="number" step="0.1" min="0.1" 
                                 class="w-full px-4 py-2 bg-white/5 border border-gray-700 rounded-lg focus:border-indigo-500 focus:outline-none text-white"
                                 required>
@@ -655,7 +675,7 @@ async def landing_page(request: Request):
                                 <div class="text-xs text-gray-500 mt-1">ID: {{ task.id }}</div>
                             </div>
                             <div class="text-right shrink-0">
-                                <div class="font-bold text-green-400">{{ task.budget }} {{ task.currency || 'USDC' }}</div>
+                                <div class="font-bold text-green-400">{{ task.budget_limit || task.budget }} {{ task.cost_unit || 'units' }}</div>
                                 <div class="text-xs mt-1 px-2 py-1 rounded-full inline-block"
                                      :class="statusClass(task.status)">
                                     {{ prettyStatus(task.status) }}
@@ -696,15 +716,15 @@ async def landing_page(request: Request):
                     <table class="w-full text-sm">
                         <thead class="text-gray-400 border-b border-gray-700">
                             <tr>
-                                <th class="text-left py-2">投標者</th>
-                                <th class="text-left py-2">價格</th>
-                                <th class="text-right py-2">任務</th>
+                                <th class="text-left py-2">Solver</th>
+                                <th class="text-left py-2">Estimated cost</th>
+                                <th class="text-right py-2">Task</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr v-for="bid in bids" :key="bid.bidder" class="border-b border-gray-800">
                                 <td class="py-3 font-medium text-white">{{ bid.bidder }}</td>
-                                <td class="py-3 text-green-400">{{ bid.price }} {{ bid.currency || 'USDC' }}</td>
+                                <td class="py-3 text-green-400">{{ bid.estimated_cost || bid.price }} {{ bid.cost_unit || 'units' }}</td>
                                 <td class="py-3 text-right text-gray-500 text-xs">{{ bid.task }}</td>
                             </tr>
                             <tr v-if="bids.length === 0"><td colspan="3" class="text-center text-gray-500 py-4">暫無投標</td></tr>
