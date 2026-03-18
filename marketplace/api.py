@@ -6,7 +6,7 @@ AI Agent Hub Web API
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional
+from typing import Optional, List
 from loguru import logger
 import uvicorn
 import asyncio
@@ -76,6 +76,8 @@ class CreateTaskRequest(BaseModel):
     budget_limit: Optional[float] = Field(default=None, gt=0, description="Internal mode budget limit")
     expected_tokens: int = Field(gt=0, description="預期 token 數必須大於 0")
     requester_id: Optional[str] = "anonymous"
+    routing_mode: Optional[str] = "internal"
+    required_domain: Optional[str] = None
     currency: Optional[str] = "USDC"  # legacy / external mode only
     
     @field_validator('description')
@@ -115,6 +117,8 @@ async def get_dashboard_data_json():
             "budget": t.max_budget,
             "budget_limit": t.max_budget,
             "status": t.status.value,
+            "routing_mode": t.routing_mode,
+            "required_domain": t.required_domain,
             "cost_unit": "internal_units",
             "currency": getattr(t, 'currency', 'USDC'),
             "assigned_to": t.assigned_to,
@@ -151,6 +155,9 @@ class BidRequest(BaseModel):
     estimated_cost: Optional[float] = Field(default=None, gt=0)
     estimated_tokens: int = Field(gt=0)
     model_name: str = "algo_v1"
+    domains: List[str] = Field(default_factory=list)
+    tools: List[str] = Field(default_factory=list)
+    trust_level: str = "standard"
     message: Optional[str] = ""
 
 class SubmitResultRequest(BaseModel):
@@ -170,9 +177,13 @@ async def create_task_root(request: Request, task_request: CreateTaskRequest):
         if resolved_budget is None:
             raise ValueError("Either max_budget or budget_limit must be provided")
         task = market.create_task(
-            description=task_request.description, input_data=task_request.input_data,
-            max_budget=resolved_budget, expected_tokens=task_request.expected_tokens,
-            requester_id=task_request.requester_id
+            description=task_request.description,
+            input_data=task_request.input_data,
+            max_budget=resolved_budget,
+            expected_tokens=task_request.expected_tokens,
+            requester_id=task_request.requester_id,
+            routing_mode=task_request.routing_mode or "internal",
+            required_domain=task_request.required_domain,
         )
         tasks_created.labels(currency=task_request.currency).inc()
         asyncio.create_task(manager.broadcast({
@@ -181,9 +192,18 @@ async def create_task_root(request: Request, task_request: CreateTaskRequest):
             "description": task_request.description,
             "budget": resolved_budget,
             "budget_limit": resolved_budget,
+            "routing_mode": task.routing_mode,
+            "required_domain": task.required_domain,
             "currency": task_request.currency
         }))
-        return {"task_id": task.task_id, "status": "created", "budget_limit": resolved_budget, "currency": task_request.currency}
+        return {
+            "task_id": task.task_id,
+            "status": "created",
+            "budget_limit": resolved_budget,
+            "routing_mode": task.routing_mode,
+            "required_domain": task.required_domain,
+            "currency": task_request.currency,
+        }
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
@@ -250,6 +270,8 @@ async def list_tasks(
                 "max_budget": t.max_budget,
                 "budget_limit": t.max_budget,
                 "status": t.status.value,
+                "routing_mode": t.routing_mode,
+                "required_domain": t.required_domain,
                 "requester_id": t.requester_id,
                 "bid_count": len(market.bids.get(t.task_id, [])),
                 "selection_reason": t.selection_reason,
@@ -337,6 +359,9 @@ async def submit_bid(task_id: str, bid_request: BidRequest):
             estimated_tokens=bid_request.estimated_tokens,
             model_name=bid_request.model_name,
             message=bid_request.message or "",
+            domains=bid_request.domains,
+            tools=bid_request.tools,
+            trust_level=bid_request.trust_level,
         )
         try:
             bids_submitted.labels(model=bid_request.model_name).inc()
@@ -374,6 +399,9 @@ async def submit_bid(task_id: str, bid_request: BidRequest):
             "cost_unit": "internal_units",
             "estimated_tokens": bid.estimated_tokens,
             "model_name": bid.model_name,
+            "domains": bid.domains,
+            "tools": bid.tools,
+            "trust_level": bid.trust_level,
             "message": bid.message,
             "auto_winner": winner,
         }

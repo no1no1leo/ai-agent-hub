@@ -75,7 +75,18 @@ class TestHubMarket:
         assert winner.bid_price == 0.5
         assert self.market.tasks[task.task_id].status == TaskStatus.IN_PROGRESS
         assert self.market.tasks[task.task_id].selection_reason is not None
-        assert "lowest valid proposal" in self.market.tasks[task.task_id].selection_reason
+        assert "estimated cost" in self.market.tasks[task.task_id].selection_reason
+
+    def test_select_winner_prefers_domain_fit_when_close(self):
+        task = self.market.create_task("Code task", "repo", 1.0, 1000, required_domain="code")
+        self.market.submit_bid(task.task_id, "general_agent", 0.50, 1000, "model", domains=["general"], trust_level="standard")
+        self.market.submit_bid(task.task_id, "code_agent", 0.60, 1000, "model", domains=["code"], trust_level="verified")
+
+        winner = self.market.select_winner(task.task_id)
+
+        assert winner is not None
+        assert winner.bidder_id == "code_agent"
+        assert "matched required domain 'code'" in self.market.tasks[task.task_id].selection_reason
 
     def test_select_winner_no_valid_bids(self):
         task = self.market.create_task("Test", "data", 1.0, 1000)
@@ -343,22 +354,31 @@ class TestDashboardApi:
             "input_data": "input.txt",
             "budget_limit": 2.0,
             "expected_tokens": 500,
-            "requester_id": "internal_requester"
+            "requester_id": "internal_requester",
+            "routing_mode": "internal",
+            "required_domain": "research"
         })
         assert create_res.status_code == 200
         task_id = create_res.json()["task_id"]
         assert create_res.json()["budget_limit"] == 2.0
+        assert create_res.json()["routing_mode"] == "internal"
+        assert create_res.json()["required_domain"] == "research"
 
         bid_res = test_client.post(f"/tasks/{task_id}/bid", json={
             "bidder_id": "agent_internal",
             "estimated_cost": 0.75,
             "estimated_tokens": 450,
-            "model_name": "algo_v1"
+            "model_name": "algo_v1",
+            "domains": ["research"],
+            "tools": ["web"],
+            "trust_level": "verified"
         })
         assert bid_res.status_code == 200
         body = bid_res.json()
         assert body["estimated_cost"] == 0.75
         assert body["cost_unit"] == "internal_units"
+        assert body["domains"] == ["research"]
+        assert body["trust_level"] == "verified"
 
 
 class TestEdgeCases:
