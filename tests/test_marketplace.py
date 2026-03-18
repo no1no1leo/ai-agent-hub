@@ -18,6 +18,7 @@ from marketplace.strategies import (
     AggressiveStrategy, ConservativeStrategy, MarketFollowStrategy,
     SniperStrategy, RandomWalkStrategy, MarketState
 )
+from marketplace.api import market as api_market
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +269,31 @@ class TestBiddingStrategies:
 
         expected = self.cost * 1.02
         assert bid == pytest.approx(expected, 0.01)
+
+
+class TestDashboardApi:
+    """Dashboard API shape tests"""
+
+    def test_dashboard_data_includes_execution_fields(self, test_client):
+        api_market.tasks.clear()
+        api_market.bids.clear()
+
+        task = api_market.create_task("Dashboard task", "input", 1.0, 1000, "buyer_01")
+        api_market.submit_bid(task.task_id, "agent_01", 0.5, 1000, "model")
+        api_market.select_winner(task.task_id)
+        api_market.submit_result(task.task_id, "draft result")
+        api_market.verify_result(task.task_id, approved=True, notes="ok")
+
+        res = test_client.get("/api/dashboard-data")
+        assert res.status_code == 200
+        data = res.json()
+        assert len(data["tasks"]) >= 1
+        found = next(t for t in data["tasks"] if t["id"] == task.task_id)
+        assert found["assigned_to"] == "agent_01"
+        assert found["selection_reason"] is not None
+        assert found["verification_status"] == "approved"
+        assert found["submitted_at"] is not None
+        assert found["verified_at"] is not None
 
 
 class TestEdgeCases:

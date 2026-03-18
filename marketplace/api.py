@@ -105,12 +105,26 @@ async def get_stats_json():
 @app.get("/api/dashboard-data")
 async def get_dashboard_data_json():
     """專為前端儀表板設計的數據接口"""
-    tasks = [{"id": t.task_id, "desc": t.description, "budget": t.max_budget, "status": t.status.value, "currency": getattr(t, 'currency', 'USDC')} for t in market.tasks.values()]
+    tasks = [
+        {
+            "id": t.task_id,
+            "desc": t.description,
+            "budget": t.max_budget,
+            "status": t.status.value,
+            "currency": getattr(t, 'currency', 'USDC'),
+            "assigned_to": t.assigned_to,
+            "selection_reason": t.selection_reason,
+            "verification_status": t.verification_status,
+            "submitted_at": t.submitted_at.isoformat() if t.submitted_at else None,
+            "verified_at": t.verified_at.isoformat() if t.verified_at else None,
+        }
+        for t in market.tasks.values()
+    ]
     bids = []
     for tid, blist in market.bids.items():
         for b in blist:
             bids.append({"task": tid, "bidder": b.bidder_id, "price": b.bid_price, "currency": getattr(b, 'currency', 'USDC')})
-    
+
     base_stats = market.get_market_stats()
 
     return {
@@ -570,7 +584,7 @@ async def landing_page(request: Request):
             <div class="card rounded-2xl p-6">
                 <h2 class="text-2xl font-bold mb-6 flex items-center gap-2">
                     <span class="text-2xl">📝</span>
-發布任務到 Broker
+                    發布任務到 Broker
                 </h2>
                 <form @submit.prevent="createTask" class="space-y-4">
                     <div>
@@ -633,15 +647,39 @@ async def landing_page(request: Request):
             <!-- Recent Tasks -->
             <div class="card rounded-2xl p-6 mb-8">
                 <h3 class="text-xl font-bold mb-4 text-indigo-300">最近任務</h3>
-                <div class="space-y-3">
-                    <div v-for="task in tasks" :key="task.id" class="flex justify-between items-center p-3 hover:bg-white/5 rounded-lg transition">
-                        <div>
-                            <div class="font-medium">{{ task.desc }}</div>
-                            <div class="text-xs text-gray-500">ID: {{ task.id }}</div>
+                <div class="space-y-4">
+                    <div v-for="task in tasks" :key="task.id" class="p-4 hover:bg-white/5 rounded-xl transition border border-white/5">
+                        <div class="flex justify-between items-start gap-4">
+                            <div class="min-w-0 flex-1">
+                                <div class="font-medium text-white">{{ task.desc }}</div>
+                                <div class="text-xs text-gray-500 mt-1">ID: {{ task.id }}</div>
+                            </div>
+                            <div class="text-right shrink-0">
+                                <div class="font-bold text-green-400">{{ task.budget }} {{ task.currency || 'USDC' }}</div>
+                                <div class="text-xs mt-1 px-2 py-1 rounded-full inline-block"
+                                     :class="statusClass(task.status)">
+                                    {{ prettyStatus(task.status) }}
+                                </div>
+                            </div>
                         </div>
-                        <div class="text-right">
-                            <div class="font-bold text-green-400">{{ task.budget }} {{ task.currency || 'USDC' }}</div>
-                            <div class="text-xs text-gray-500 capitalize">{{ task.status }}</div>
+
+                        <div class="mt-3 flex flex-wrap gap-2 text-xs">
+                            <span class="px-2 py-1 rounded-full bg-white/5 text-gray-300">posted</span>
+                            <span class="px-2 py-1 rounded-full" :class="task.assigned_to ? 'bg-indigo-900 text-indigo-300' : 'bg-white/5 text-gray-500'">assigned</span>
+                            <span class="px-2 py-1 rounded-full" :class="task.submitted_at ? 'bg-yellow-900 text-yellow-300' : 'bg-white/5 text-gray-500'">submitted</span>
+                            <span class="px-2 py-1 rounded-full" :class="task.verified_at ? 'bg-green-900 text-green-300' : 'bg-white/5 text-gray-500'">verified</span>
+                        </div>
+
+                        <div v-if="task.assigned_to" class="mt-3 text-sm text-gray-300">
+                            <span class="text-gray-500">Assigned to:</span> {{ task.assigned_to }}
+                        </div>
+
+                        <div v-if="task.selection_reason" class="mt-2 text-xs text-gray-400 leading-relaxed">
+                            <span class="text-gray-500">Why selected:</span> {{ task.selection_reason }}
+                        </div>
+
+                        <div v-if="task.verification_status" class="mt-2 text-xs text-gray-400">
+                            <span class="text-gray-500">Verification:</span> {{ task.verification_status }}
                         </div>
                     </div>
                     <div v-if="tasks.length === 0" class="text-center text-gray-500 py-4">
@@ -741,6 +779,28 @@ async def landing_page(request: Request):
                         if (marketSection) {
                             marketSection.scrollIntoView({ behavior: 'smooth' });
                         }
+                    },
+                    prettyStatus(status) {
+                        const labels = {
+                            open: 'open',
+                            in_progress: 'in progress',
+                            submitted: 'submitted',
+                            verified: 'verified',
+                            completed: 'completed',
+                            failed: 'failed'
+                        };
+                        return labels[status] || status;
+                    },
+                    statusClass(status) {
+                        const classes = {
+                            open: 'bg-slate-800 text-slate-300',
+                            in_progress: 'bg-indigo-900 text-indigo-300',
+                            submitted: 'bg-yellow-900 text-yellow-300',
+                            verified: 'bg-emerald-900 text-emerald-300',
+                            completed: 'bg-green-900 text-green-300',
+                            failed: 'bg-red-900 text-red-300'
+                        };
+                        return classes[status] || 'bg-slate-800 text-slate-300';
                     },
                     async createTask() {
                         this.creating = true;
