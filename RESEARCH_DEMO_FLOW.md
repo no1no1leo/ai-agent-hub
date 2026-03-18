@@ -25,6 +25,10 @@ The result is verified and reputation updates automatically.
    - `required_domain = research`
    - `budget_limit = 5.0`
 
+### Fast path
+Use the seeded demo endpoint:
+- `POST /demo/research/seed`
+
 2. Submit proposals from multiple solvers:
    - generic algo solver
    - research-specialized solver

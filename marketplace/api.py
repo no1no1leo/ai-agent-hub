@@ -168,6 +168,13 @@ class VerifyResultRequest(BaseModel):
     notes: Optional[str] = ""
 
 
+class SeedResearchDemoRequest(BaseModel):
+    topic: str = "Summarize the latest NVIDIA GTC announcements with citations"
+    budget_limit: float = Field(default=5.0, gt=0)
+    requester_id: str = "research_requester"
+    auto_verify: bool = True
+
+
 @app.post("/tasks", response_model=None)
 @limiter.limit("30/minute")
 async def create_task_root(request: Request, task_request: CreateTaskRequest):
@@ -315,6 +322,8 @@ async def get_task(task_id: str):
         "budget_limit": t.max_budget,
         "expected_tokens": t.expected_tokens,
         "status": t.status.value,
+        "routing_mode": t.routing_mode,
+        "required_domain": t.required_domain,
         "cost_unit": "internal_units",
         "currency": getattr(t, 'currency', 'USDC'),
         "requester_id": t.requester_id,
@@ -437,6 +446,90 @@ async def verify_task_result(task_id: str, request: VerifyResultRequest):
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/demo/research/seed")
+async def seed_research_demo(request: SeedResearchDemoRequest):
+    task = market.create_task(
+        description=request.topic,
+        input_data="web",
+        max_budget=request.budget_limit,
+        expected_tokens=8000,
+        requester_id=request.requester_id,
+        routing_mode="internal",
+        required_domain="research",
+    )
+
+    seeded_bids = [
+        {
+            "bidder_id": "algo_research_worker",
+            "bid_price": 1.2,
+            "estimated_tokens": 7000,
+            "model_name": "algo-research-v1",
+            "domains": ["research", "market-intel"],
+            "tools": ["web"],
+            "trust_level": "standard",
+            "message": "Fast internal research worker",
+        },
+        {
+            "bidder_id": "browser_research_worker",
+            "bid_price": 1.6,
+            "estimated_tokens": 7500,
+            "model_name": "browser-research-v1",
+            "domains": ["research", "technical-analysis"],
+            "tools": ["web", "browser", "citations"],
+            "trust_level": "verified",
+            "message": "Browser-enabled research agent with citation support",
+        },
+        {
+            "bidder_id": "gptr_style_worker",
+            "bid_price": 1.8,
+            "estimated_tokens": 9000,
+            "model_name": "deep-research-worker",
+            "domains": ["research", "market-intel", "technical-analysis"],
+            "tools": ["web", "browser", "citations", "memory"],
+            "trust_level": "verified",
+            "message": "Deep research worker optimized for sourced reports",
+        },
+    ]
+
+    created_bids = []
+    for bid in seeded_bids:
+        created = market.submit_bid(**{"task_id": task.task_id, **bid})
+        created_bids.append({
+            "bid_id": created.bid_id,
+            "bidder_id": created.bidder_id,
+            "estimated_cost": created.bid_price,
+            "domains": created.domains,
+            "trust_level": created.trust_level,
+            "model_name": created.model_name,
+        })
+
+    winner = market.select_winner(task.task_id)
+    winner_payload = None
+    if winner:
+        result_text = (
+            "Research memo: NVIDIA emphasized agentic AI, open models, robotics, and AI infrastructure. "
+            "Sources should include official NVIDIA GTC materials and selected secondary reporting."
+        )
+        market.submit_result(task.task_id, result_text)
+        if request.auto_verify:
+            market.verify_result(task.task_id, approved=True, notes="Seeded demo auto-verification passed")
+        winner_payload = {
+            "bidder_id": winner.bidder_id,
+            "estimated_cost": winner.bid_price,
+            "domains": winner.domains,
+            "trust_level": winner.trust_level,
+            "model_name": winner.model_name,
+        }
+
+    task_data = await get_task(task.task_id)
+    return {
+        "demo": "research-task-broker",
+        "task": task_data,
+        "seeded_bids": created_bids,
+        "winner": winner_payload,
+    }
 
 
 @app.post("/tasks/{task_id}/select-winner", response_model=None)

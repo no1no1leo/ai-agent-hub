@@ -702,6 +702,22 @@ class TestAPI:
         # is acceptable. We mainly check it does not 500.
         assert response.status_code in (200, 404)
 
+    def test_seed_research_demo_endpoint(self):
+        response = self.client.post("/demo/research/seed", json={
+            "topic": "Summarize the latest NVIDIA GTC announcements with citations",
+            "budget_limit": 5.0,
+            "requester_id": "demo_user",
+            "auto_verify": True
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["demo"] == "research-task-broker"
+        assert data["task"]["required_domain"] == "research"
+        assert data["task"]["routing_mode"] == "internal"
+        assert len(data["seeded_bids"]) == 3
+        assert data["winner"] is not None
+        assert data["task"]["verification_status"] == "approved"
+
 
 # ---------------------------------------------------------------------------
 # New: TestSolverAgents
