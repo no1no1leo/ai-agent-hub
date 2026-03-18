@@ -136,6 +136,17 @@ class HubMarket:
             task.status = TaskStatus.FAILED
             logger.info(f"❌ [Market] 任務 {task_id} 驗證失敗")
 
+        if task.assigned_to:
+            from .reputation import reputation_system
+
+            reputation_system.update_from_verification(
+                agent_id=task.assigned_to,
+                approved=approved,
+                rating=5.0 if approved else 2.0,
+                latency_score=1.0,
+                budget_score=1.0,
+            )
+
     def complete_task(self, task_id: str, result: str):
         if task_id not in self.tasks:
             raise ValueError("Task not found")

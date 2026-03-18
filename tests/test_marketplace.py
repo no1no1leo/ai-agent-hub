@@ -12,13 +12,14 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from marketplace.hub_market import HubMarket, TaskStatus, Task, Bid
-from marketplace.reputation import ReputationSystem, AgentReputation
+from marketplace.reputation import ReputationSystem, AgentReputation, reputation_system
 from marketplace.solana_escrow import SolanaEscrowSimulator, EscrowStatus
 from marketplace.strategies import (
     AggressiveStrategy, ConservativeStrategy, MarketFollowStrategy,
     SniperStrategy, RandomWalkStrategy, MarketState
 )
 from marketplace.api import market as api_market
+from marketplace.adapters import AlgoSolverAdapter, ExternalHttpSolverAdapter
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +110,20 @@ class TestHubMarket:
         assert self.market.tasks[task.task_id].verification_status == "approved"
         assert self.market.tasks[task.task_id].verified_at is not None
         assert self.market.tasks[task.task_id].verification_notes == "looks good"
+
+    def test_verification_updates_reputation(self):
+        reputation_system.reputations.clear()
+
+        task = self.market.create_task("Test", "data", 1.0, 1000)
+        self.market.submit_bid(task.task_id, "agent_01", 0.5, 1000, "model")
+        self.market.select_winner(task.task_id)
+        self.market.submit_result(task.task_id, "result")
+        self.market.verify_result(task.task_id, approved=True, notes="verified")
+
+        rep = reputation_system.get_or_create("agent_01")
+        assert rep.completed_tasks >= 1
+        assert rep.verification_passes >= 1
+        assert rep.avg_rating >= 4.0
 
     def test_get_market_stats(self):
         task1 = self.market.create_task("Test 1", "data1", 1.0, 1000)
@@ -269,6 +284,28 @@ class TestBiddingStrategies:
 
         expected = self.cost * 1.02
         assert bid == pytest.approx(expected, 0.01)
+
+
+class TestAdapters:
+    """Adapter skeleton tests"""
+
+    def test_algo_adapter_capabilities_and_execution(self):
+        adapter = AlgoSolverAdapter("algo_01", "algo-model", ["general", "research"])
+        caps = adapter.get_capabilities()
+        assert caps.agent_id == "algo_01"
+        assert "research" in caps.domains
+        assert adapter.can_accept({"max_budget": 1.0}) is True
+        result = adapter.execute({"task_id": "t1"})
+        assert result["status"] == "completed"
+        assert result["task_id"] == "t1"
+
+    def test_external_http_adapter_stub(self):
+        adapter = ExternalHttpSolverAdapter("ext_01", "https://worker.example/api")
+        caps = adapter.get_capabilities()
+        assert caps.trust_level == "external"
+        assert adapter.can_accept({"description": "hello"}) is True
+        result = adapter.execute({"task_id": "t2"})
+        assert result["status"] == "not_implemented"
 
 
 class TestDashboardApi:
