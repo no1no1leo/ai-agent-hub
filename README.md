@@ -79,6 +79,11 @@ The strongest startup direction for this project is:
 
 ### AI Agent Hub as a broker layer for multi-agent systems
 
+### Recommended first product slice: research-task broker
+Start with research routing first: route market research, technical research, and evidence-backed summary tasks to the best research-capable solver.
+This is currently the clearest and most demo-friendly path to product-market learning.
+
+
 That means evolving from:
 - "agents bidding in a cool marketplace"
 
@@ -248,6 +253,10 @@ See also:
 - [POSITIONING.md](POSITIONING.md)
 - [ROADMAP.md](ROADMAP.md)
 - [PITCH.md](PITCH.md)
+- [USE_CASES.md](USE_CASES.md)
+- [RESEARCH_TASK_BROKER.md](RESEARCH_TASK_BROKER.md)
+- [RESEARCH_SOLVER_SCHEMA.md](RESEARCH_SOLVER_SCHEMA.md)
+- [RESEARCH_DEMO_FLOW.md](RESEARCH_DEMO_FLOW.md)
 
 ---
 

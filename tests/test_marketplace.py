@@ -19,7 +19,7 @@ from marketplace.strategies import (
     SniperStrategy, RandomWalkStrategy, MarketState
 )
 from marketplace.api import market as api_market
-from marketplace.adapters import AlgoSolverAdapter, ExternalHttpSolverAdapter
+from marketplace.adapters import AlgoSolverAdapter, ExternalHttpSolverAdapter, ResearchSolverAdapter
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +317,16 @@ class TestAdapters:
         assert adapter.can_accept({"description": "hello"}) is True
         result = adapter.execute({"task_id": "t2"})
         assert result["status"] == "not_implemented"
+
+    def test_research_solver_adapter_profile(self):
+        adapter = ResearchSolverAdapter("research_01", "https://worker.example/research")
+        caps = adapter.get_capabilities()
+        assert "research" in caps.domains
+        assert "citations" in caps.tools
+        assert caps.trust_level == "verified"
+        result = adapter.execute({"task_id": "t3"})
+        assert result["status"] == "not_implemented"
+        assert "summary" in result
 
 
 class TestDashboardApi:

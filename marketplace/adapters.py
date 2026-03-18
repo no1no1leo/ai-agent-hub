@@ -110,3 +110,32 @@ class ExternalHttpSolverAdapter(BaseSolverAdapter):
             "endpoint": self.endpoint,
             "task_id": task.get("task_id"),
         }
+
+
+class ResearchSolverAdapter(ExternalHttpSolverAdapter):
+    """Specialized adapter profile for research-oriented workers."""
+
+    def __init__(self, agent_id: str, endpoint: str, model_name: str = "research-worker"):
+        super().__init__(agent_id=agent_id, endpoint=endpoint, model_name=model_name)
+
+    def get_capabilities(self) -> SolverCapabilities:
+        return SolverCapabilities(
+            agent_id=self.agent_id,
+            model_name=self.model_name,
+            domains=["research", "market-intel", "technical-analysis"],
+            modalities=["text", "web", "documents"],
+            tools=["web", "browser", "citations", "memory"],
+            latency_class="balanced",
+            cost_class="medium",
+            trust_level="verified",
+            max_context_tokens=128000,
+        )
+
+    def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "status": "not_implemented",
+            "task_id": task.get("task_id"),
+            "summary": "Research solver stub executed.",
+            "sources": [],
+            "notes": "Connect this adapter to a real research agent next.",
+        }
